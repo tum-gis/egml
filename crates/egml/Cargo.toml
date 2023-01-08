@@ -1,0 +1,13 @@
+[package]
+name = "egml"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Library for processing GML data structures"
+
+[dependencies]
+egml-core = { version = "0.0.1-alpha.1", path = "../egml-core", registry = "custom" }
+egml-io = { version = "0.0.1-alpha.1", path = "../egml-io", registry = "custom" }
+egml-transform = { version = "0.0.1-alpha.1", path = "../egml-transform", registry = "custom" }

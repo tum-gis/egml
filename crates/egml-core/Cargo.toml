@@ -1,0 +1,12 @@
+[package]
+name = "egml-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core of the egml library"
+
+[dependencies]
+thiserror = { workspace = true }
+nalgebra = { workspace = true }

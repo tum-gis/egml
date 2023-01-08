@@ -1,0 +1,14 @@
+[package]
+name = "egml-transform"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Transform of the egml library"
+
+[dependencies]
+egml-core = { version = "0.0.1-alpha.1", path = "../egml-core", registry = "custom" }
+
+thiserror = { workspace = true }
+nalgebra = { workspace = true }
