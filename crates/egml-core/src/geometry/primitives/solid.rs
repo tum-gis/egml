@@ -1,12 +1,12 @@
 use crate::error::Error;
-use crate::LinearRing;
+use crate::{enlarge_envelopes, Envelope, LinearRing};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MultiSurface {
+pub struct Solid {
     members: Vec<LinearRing>,
 }
 
-impl MultiSurface {
+impl Solid {
     pub fn new(members: Vec<LinearRing>) -> Result<Self, Error> {
         if members.is_empty() {
             return Err(Error::MustNotBeEmpty(""));
@@ -25,5 +25,12 @@ impl MultiSurface {
         }
         self.members = val;
         Ok(())
+    }
+
+    pub fn get_envelope(&self) -> Result<Envelope, Error> {
+        let envelopes: Vec<Envelope> = self.members.iter().map(|m| m.get_envelope()).collect();
+
+        let enlarged_envelope = enlarge_envelopes(&envelopes)?;
+        Ok(enlarged_envelope)
     }
 }

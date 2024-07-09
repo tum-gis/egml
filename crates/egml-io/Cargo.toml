@@ -5,11 +5,11 @@ authors.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "IO of the egml library"
+description = "IO operations for processing GML data."
 
 
 [dependencies]
-egml-core = { version = "0.0.1-alpha.1", path = "../egml-core", registry = "custom" }
+egml-core = { version = "0.0.1-alpha.3", path = "../egml-core" }
 
 thiserror = { workspace = true }
 serde = { workspace = true, features = [ "derive" ] }

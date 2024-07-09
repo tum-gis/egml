@@ -5,11 +5,11 @@ authors.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "CLI tool for GML operations"
+description = "CLI tool for processing GML data."
 
 
 [dependencies]
-egml = { version = "0.0.1-alpha.1", path = "../egml", registry = "custom" }
+egml = { version = "0.0.1-alpha.3", path = "../egml" }
 
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

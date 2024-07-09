@@ -1,6 +1,7 @@
 use crate::error::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+// TODO: implement ordering and comparisons
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct DirectPosition {
     x: f64,
     y: f64,
@@ -28,6 +29,10 @@ impl DirectPosition {
         self.z
     }
 
+    pub fn coords(&self) -> Vec<f64> {
+        vec![self.x, self.y, self.z]
+    }
+
     pub fn set_x(&mut self, val: f64) -> Result<(), Error> {
         if !val.is_finite() {
             return Err(Error::ValueNotFinite("x"));
@@ -51,6 +56,17 @@ impl DirectPosition {
         self.z = val;
         Ok(())
     }
+
+    pub const MIN: DirectPosition = DirectPosition {
+        x: f64::MIN,
+        y: f64::MIN,
+        z: f64::MIN,
+    };
+    pub const MAX: DirectPosition = DirectPosition {
+        x: f64::MAX,
+        y: f64::MAX,
+        z: f64::MAX,
+    };
 }
 
 impl From<DirectPosition> for nalgebra::Vector3<f64> {

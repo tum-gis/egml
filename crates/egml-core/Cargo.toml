@@ -5,8 +5,10 @@ authors.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Core of the egml library"
+description = "Core primitives and operations for processing GML data."
 
 [dependencies]
 thiserror = { workspace = true }
 nalgebra = { workspace = true }
+parry3d-f64 = { workspace = true }
+itertools = { workspace = true }

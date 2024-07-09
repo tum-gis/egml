@@ -1,33 +1,39 @@
 use egml_core::{DirectPosition, LinearRing};
 
+use crate::error::Error;
+use crate::error::Error::{MissingElements, Only3DSupported};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename = "gml:exterior")]
-pub struct LinearRingElement {
+pub struct GmlLinearRing {
     #[serde(rename = "$value")]
-    pub pos_list: Option<PosListElement>,
+    pub pos_list: Option<GmlPosList>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename = "gml:posList")]
-pub struct PosListElement {
+pub struct GmlPosList {
     #[serde(rename = "@srsDimension")]
     srs_dimension: Option<u32>,
     #[serde(rename = "$value")]
     value: String,
 }
 
-impl From<&PosListElement> for LinearRing {
-    fn from(item: &PosListElement) -> Self {
-        assert_eq!(item.srs_dimension.unwrap_or(3), 3);
+impl GmlPosList {
+    pub fn to_linear_ring(self) -> Result<LinearRing, Error> {
+        if self.srs_dimension.unwrap_or(3) != 3 {
+            return Err(Only3DSupported());
+        }
 
-        let parsed_values: Vec<f64> = item
+        let parsed_values: Vec<f64> = self
             .value
             .split_whitespace()
             .map(|s| s.parse().unwrap())
             .collect();
-        assert_eq!(parsed_values.len() % 3, 0);
+        if parsed_values.len() % 3 != 0 {
+            return Err(MissingElements());
+        }
 
         let mut points: Vec<DirectPosition> = Vec::new();
         for chunk in parsed_values.chunks(3) {
@@ -35,7 +41,22 @@ impl From<&PosListElement> for LinearRing {
             points.push(point);
         }
 
-        // TODO: handle error during into
-        LinearRing::new(points).unwrap()
+        if points.first().unwrap() == points.last().unwrap() {
+            points.pop();
+        }
+
+        let linear_ring = LinearRing::new(points)?;
+        Ok(linear_ring)
+    }
+}
+
+impl GmlLinearRing {
+    pub fn to_linear_ring(self) -> Result<LinearRing, Error> {
+        let pos_list: GmlPosList = self
+            .pos_list
+            .ok_or(Error::ElementNotFound("No element found".to_string()))
+            .unwrap();
+        let linear_ring: LinearRing = pos_list.to_linear_ring()?;
+        Ok(linear_ring)
     }
 }
