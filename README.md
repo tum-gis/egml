@@ -2,8 +2,7 @@
 
 A Rust library for processing [GML](https://www.ogc.org/standard/gml/) data.
 
-> [!WARNING]  
-> The library is at an early stage of development.
+The library is at an early stage of development.
 
 ## Contributing
 

@@ -9,11 +9,11 @@ description = "IO operations for processing GML data."
 
 
 [dependencies]
-egml-core = { version = "0.0.1-alpha.3", path = "../egml-core" }
+egml-core = { version = "0.0.1-alpha.4", path = "../egml-core" }
 
 thiserror = { workspace = true }
-serde = { workspace = true, features = [ "derive" ] }
-quick-xml = { workspace = true, features = [ "serialize" ] }
+serde = { workspace = true, features = ["derive"] }
+quick-xml = { workspace = true, features = ["serialize"] }
 nalgebra = { workspace = true }
 # parry3d-f64 = { workspace = true, features = ["f64"] }
-
+sha2 = { workspace = true }

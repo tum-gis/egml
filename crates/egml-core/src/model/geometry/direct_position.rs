@@ -1,6 +1,8 @@
 use crate::error::Error;
+use crate::operations::geometry::Geometry;
+use nalgebra::{Isometry3, Point3};
+use std::fmt;
 
-// TODO: implement ordering and comparisons
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct DirectPosition {
     x: f64,
@@ -67,6 +69,30 @@ impl DirectPosition {
         y: f64::MAX,
         z: f64::MAX,
     };
+    pub const ORIGIN: DirectPosition = DirectPosition {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+}
+
+impl Geometry for DirectPosition {
+    fn points(&self) -> Vec<&DirectPosition> {
+        Vec::from([self])
+    }
+
+    fn apply_transform(&mut self, m: &Isometry3<f64>) {
+        let p: Point3<f64> = m * Point3::new(self.x, self.y, self.z);
+        self.x = p.x;
+        self.y = p.y;
+        self.z = p.z;
+    }
+}
+
+impl fmt::Display for DirectPosition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({}, {}, {})", self.x, self.y, self.z)
+    }
 }
 
 impl From<DirectPosition> for nalgebra::Vector3<f64> {
@@ -77,6 +103,18 @@ impl From<DirectPosition> for nalgebra::Vector3<f64> {
 
 impl From<nalgebra::Vector3<f64>> for DirectPosition {
     fn from(item: nalgebra::Vector3<f64>) -> Self {
+        Self::new(item.x, item.y, item.z).unwrap()
+    }
+}
+
+impl From<&DirectPosition> for nalgebra::Vector3<f64> {
+    fn from(item: &DirectPosition) -> Self {
+        Self::new(item.x, item.y, item.z)
+    }
+}
+
+impl From<&nalgebra::Vector3<f64>> for DirectPosition {
+    fn from(item: &nalgebra::Vector3<f64>) -> Self {
         Self::new(item.x, item.y, item.z).unwrap()
     }
 }
@@ -96,6 +134,6 @@ impl From<DirectPosition> for nalgebra::Point3<f32> {
 impl From<nalgebra::Point3<f64>> for DirectPosition {
     fn from(item: nalgebra::Point3<f64>) -> Self {
         // TODO: how to handle error?
-        Self::new(item.x, item.y, item.z).unwrap()
+        Self::new(item.x, item.y, item.z).expect("Should work")
     }
 }

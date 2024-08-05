@@ -1,12 +1,14 @@
 use quick_xml::de;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::error::Error;
 use crate::error::Error::MissingElements;
 use crate::GmlSurfaceMember;
-use egml_core::{LinearRing, Solid};
+use egml_core::model::base::{Gml, Id};
+use egml_core::model::geometry::{LinearRing, Solid};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename = "gml:Solid")]
 struct GmlSolid {
     #[serde(rename = "@id", default)]
@@ -17,39 +19,52 @@ struct GmlSolid {
     exterior: Option<GmlShellProperty>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename = "gml:exterior")]
 struct GmlShellProperty {
     #[serde(rename = "$value")]
     shell: Option<GmlShell>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename = "gml:Shell")]
 struct GmlShell {
     #[serde(rename = "$value")]
     members: Vec<GmlSurfaceMember>,
 }
 
+impl TryFrom<GmlSolid> for Solid {
+    type Error = Error;
+
+    fn try_from(value: GmlSolid) -> Result<Self, Self::Error> {
+        let id: Id = value.id.clone().try_into().ok().unwrap_or_else(|| {
+            let mut hasher = DefaultHasher::new();
+            value.hash(&mut hasher);
+            Id::from_hashed_u64(hasher.finish())
+        });
+        let gml = Gml::new(id);
+
+        let linear_rings: Vec<LinearRing> = value
+            .exterior
+            .ok_or(MissingElements())?
+            .shell
+            .ok_or(MissingElements())?
+            .members
+            .into_iter()
+            .flat_map(|x| x.polygon)
+            .map(|x| x.exterior)
+            .flat_map(|x| x.linear_ring)
+            .map(|x| x.try_into().unwrap())
+            .collect();
+
+        let solid = Solid::new(gml, linear_rings)?;
+        Ok(solid)
+    }
+}
+
 pub fn parse_solid(source_text: &str) -> Result<Solid, Error> {
     let parsed_geometry: GmlSolid = de::from_str(source_text)?;
-    //println!("{}", parsed_geometry.id);
-
-    let linear_rings: Vec<LinearRing> = parsed_geometry
-        .exterior
-        .ok_or(MissingElements())?
-        .shell
-        .ok_or(MissingElements())?
-        .members
-        .into_iter()
-        .flat_map(|x| x.polygon)
-        .map(|x| x.exterior)
-        .flat_map(|x| x.linear_ring)
-        .map(|x| x.to_linear_ring().unwrap())
-        .collect();
-
-    let solid = Solid::new(linear_rings)?;
-    Ok(solid)
+    parsed_geometry.try_into()
 }
 
 #[cfg(test)]
@@ -120,5 +135,25 @@ mod tests {
         let solid_geometry = parse_solid(source_text).unwrap();
 
         assert_eq!(solid_geometry.members().len(), 2);
+    }
+
+    #[test]
+    fn parsing_solid_with_xlinks_only() {
+        // TODO
+        let source_text = "\
+        <gml:Solid srsDimension=\"3\">
+          <gml:exterior>
+            <gml:Shell>
+              <gml:surfaceMember xlink:href=\"#DEBY_LOD2_4905373_a8f507d0-7f89-4966-8f8d-0ffa02508922_poly\"/>
+              <gml:surfaceMember xlink:href=\"#DEBY_LOD2_4905373_d2691fca-4e89-404c-80f8-fc90794581d8_poly\"/>
+              <gml:surfaceMember xlink:href=\"#DEBY_LOD2_4905373_f3d48f8e-6ae2-49ea-9dd8-4f08af06a738_poly\"/>
+              <gml:surfaceMember xlink:href=\"#DEBY_LOD2_4905373_1dea43d2-0e28-4010-9297-606eb7abcc42_poly\"/>
+            </gml:Shell>
+          </gml:exterior>
+        </gml:Solid>";
+
+        //let solid_geometry = parse_solid(source_text).unwrap();
+
+        //assert_eq!(solid_geometry.members().len(), 4);
     }
 }

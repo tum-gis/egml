@@ -1,17 +1,22 @@
-use egml_core::{DirectPosition, LinearRing};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::error::Error;
 use crate::error::Error::{MissingElements, Only3DSupported};
+use egml_core::model::base::{Gml, Id};
+use egml_core::model::geometry::{DirectPosition, LinearRing};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename = "gml:exterior")]
 pub struct GmlLinearRing {
+    #[serde(rename = "@id", default)]
+    pub id: String,
+
     #[serde(rename = "$value")]
     pub pos_list: Option<GmlPosList>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename = "gml:posList")]
 pub struct GmlPosList {
     #[serde(rename = "@srsDimension")]
@@ -20,13 +25,15 @@ pub struct GmlPosList {
     value: String,
 }
 
-impl GmlPosList {
-    pub fn to_linear_ring(self) -> Result<LinearRing, Error> {
-        if self.srs_dimension.unwrap_or(3) != 3 {
+impl TryFrom<GmlPosList> for Vec<DirectPosition> {
+    type Error = Error;
+
+    fn try_from(value: GmlPosList) -> Result<Self, Self::Error> {
+        if value.srs_dimension.unwrap_or(3) != 3 {
             return Err(Only3DSupported());
         }
 
-        let parsed_values: Vec<f64> = self
+        let parsed_values: Vec<f64> = value
             .value
             .split_whitespace()
             .map(|s| s.parse().unwrap())
@@ -41,22 +48,68 @@ impl GmlPosList {
             points.push(point);
         }
 
+        points.dedup();
         if points.first().unwrap() == points.last().unwrap() {
             points.pop();
         }
 
-        let linear_ring = LinearRing::new(points)?;
+        Ok(points)
+    }
+}
+
+impl TryFrom<GmlLinearRing> for LinearRing {
+    type Error = Error;
+
+    fn try_from(value: GmlLinearRing) -> Result<Self, Self::Error> {
+        let id: Id = value.id.clone().try_into().ok().unwrap_or_else(|| {
+            let mut hasher = DefaultHasher::new();
+            value.hash(&mut hasher);
+            Id::from_hashed_u64(hasher.finish())
+        });
+        let gml = Gml::new(id);
+
+        let pos_list: GmlPosList = value
+            .pos_list
+            .ok_or(Error::ElementNotFound("No element found".to_string()))
+            .unwrap();
+        let points: Vec<DirectPosition> = pos_list.try_into()?;
+
+        let linear_ring = LinearRing::new(gml, points)?;
         Ok(linear_ring)
     }
 }
 
-impl GmlLinearRing {
-    pub fn to_linear_ring(self) -> Result<LinearRing, Error> {
-        let pos_list: GmlPosList = self
-            .pos_list
-            .ok_or(Error::ElementNotFound("No element found".to_string()))
-            .unwrap();
-        let linear_ring: LinearRing = pos_list.to_linear_ring()?;
-        Ok(linear_ring)
+#[cfg(test)]
+mod tests {
+    use crate::{Error, GmlLinearRing};
+    use egml_core::model::geometry::LinearRing;
+    use quick_xml::de;
+
+    #[test]
+    fn parsing_linear_ring() {
+        let source_text = "<gml:LinearRing gml:id=\"4018115_LR.d2yyBHNssydL8g3B8MvW\">
+<gml:posList srsDimension=\"3\">
+678058.447 5403817.567 424.209
+678058.275 5403817.484 424.209
+678058.689 5403816.628 424.209
+678058.871 5403816.718 424.209
+678058.447 5403817.567 424.209
+</gml:posList>
+</gml:LinearRing>";
+
+        let parsed_geometry: GmlLinearRing = de::from_str(source_text).expect("");
+        let l: LinearRing = parsed_geometry.try_into().unwrap();
+    }
+
+    #[test]
+    fn parsing_linear_ring_with_duplicates() {
+        let source_text = "<gml:LinearRing gml:id=\"DEBY_LOD2_4959457_LR.EEAbfUPItTlOGZGH7VDv\">
+                      <gml:posList>691040.851 5336002.449 529.908 691040.741 5336002.172 529.908 691040.851 5336002.449 529.908 691040.851 5336002.449 529.908</gml:posList>
+                    </gml:LinearRing>";
+
+        let parsed_geometry: GmlLinearRing = de::from_str(source_text).expect("");
+        let result: Result<LinearRing, Error> = parsed_geometry.try_into();
+
+        assert!(result.is_err());
     }
 }

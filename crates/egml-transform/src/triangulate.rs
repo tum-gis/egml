@@ -1,15 +1,16 @@
 use crate::Error;
-use egml_core::{
+use egml_core::model::geometry::{
     DirectPosition, LinearRing, MultiSurface, Polygon, Solid, Triangle, TriangulatedSurface,
 };
+use egml_core::operations::geometry::Geometry;
 use itertools::Itertools;
 
 pub fn triangulate_polygon(polygon: &Polygon) -> Result<TriangulatedSurface, Error> {
-    let mut triangulated_surface = triangulate_linear_ring(polygon.exterior())?;
+    let mut triangulated_surface = triangulate_linear_ring(&polygon.exterior)?;
 
     // TODO: no cloning
     let mut interior_triangulated_surface: Vec<TriangulatedSurface> = polygon
-        .interior()
+        .interior
         .iter()
         .map(triangulate_linear_ring)
         .collect::<Result<Vec<_>, _>>()?;
@@ -28,13 +29,13 @@ pub fn triangulate_linear_ring(linear_ring: &LinearRing) -> Result<TriangulatedS
 
     for (prev, next) in linear_ring
         .points()
-        .iter()
+        .into_iter()
         .skip(1)
         .collect::<Vec<&DirectPosition>>()
         .iter()
         .tuple_windows()
     {
-        let new_triangle = Triangle::new(first_point, **prev, **next)?;
+        let new_triangle = Triangle::new(*first_point, **prev, **next)?;
         triangles.push(new_triangle);
     }
 
@@ -46,7 +47,7 @@ pub fn triangulate_multi_surface(
     multi_surface: &MultiSurface,
 ) -> Result<Vec<TriangulatedSurface>, Error> {
     let triangulated_surfaces: Vec<TriangulatedSurface> = multi_surface
-        .members()
+        .surface_member()
         .iter()
         .map(triangulate_polygon)
         .collect::<Result<Vec<TriangulatedSurface>, Error>>()?;

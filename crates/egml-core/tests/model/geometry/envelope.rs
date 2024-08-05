@@ -1,4 +1,4 @@
-use egml_core::{DirectPosition, Envelope};
+use egml_core::model::geometry::{DirectPosition, Envelope};
 
 #[test]
 fn envelope_contains() {

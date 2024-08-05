@@ -1,4 +1,4 @@
-use egml_core::{DirectPosition, Triangle};
+use egml_core::model::geometry::{DirectPosition, Triangle};
 
 #[test]
 fn triangle_construction_test() {

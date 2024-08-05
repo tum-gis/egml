@@ -1,4 +1,4 @@
-use crate::DirectPosition;
+use crate::model::geometry::DirectPosition;
 use nalgebra::Point3;
 use parry3d_f64::na;
 

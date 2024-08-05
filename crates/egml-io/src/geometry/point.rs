@@ -1,10 +1,10 @@
 use crate::error::Error;
 use crate::error::Error::{MissingElements, Only3DSupported};
-use egml_core::DirectPosition;
+use egml_core::model::geometry::DirectPosition;
 use quick_xml::de;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename = "gml:Point")]
 struct GmlPoint {
     #[serde(rename = "@id", default)]
@@ -12,7 +12,7 @@ struct GmlPoint {
     pos: GmlPos,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename = "gml:pos")]
 struct GmlPos {
     #[serde(rename = "@srsDimension")]
@@ -21,13 +21,15 @@ struct GmlPos {
     value: String,
 }
 
-impl GmlPos {
-    pub fn to_direct_position(self) -> Result<DirectPosition, Error> {
-        if self.srs_dimension.unwrap_or(3) != 3 {
+impl TryFrom<GmlPos> for DirectPosition {
+    type Error = Error;
+
+    fn try_from(value: GmlPos) -> Result<Self, Self::Error> {
+        if value.srs_dimension.unwrap_or(3) != 3 {
             return Err(Only3DSupported());
         }
 
-        let parsed_values: Vec<f64> = self
+        let parsed_values: Vec<f64> = value
             .value
             .split_whitespace()
             .map(|s| s.parse().unwrap())
@@ -43,9 +45,7 @@ impl GmlPos {
 
 pub fn parse_point(source_text: &str) -> Result<DirectPosition, Error> {
     let parsed_point: GmlPoint = de::from_str(source_text)?;
-
-    let point: DirectPosition = parsed_point.pos.to_direct_position()?;
-    Ok(point)
+    parsed_point.pos.try_into()
 }
 
 #[cfg(test)]

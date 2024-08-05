@@ -1,11 +1,13 @@
 use crate::error::Error;
-use egml_core::{MultiSurface, Polygon};
 use quick_xml::de;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::geometry::polygon::GmlPolygon;
+use egml_core::model::base::{Gml, Id};
+use egml_core::model::geometry::{MultiSurface, Polygon};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename = "gml:MultiSurface")]
 struct GmlMultiSurface {
     #[serde(rename = "@id", default)]
@@ -14,31 +16,41 @@ struct GmlMultiSurface {
     members: Vec<GmlSurfaceMember>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename = "gml:surfaceMember")]
 pub struct GmlSurfaceMember {
+    #[serde(rename = "@href", default)]
+    href: String,
     #[serde(rename = "$value")]
     pub polygon: Option<GmlPolygon>,
 }
 
-impl GmlMultiSurface {
-    pub fn to_multi_surface(self) -> Result<MultiSurface, Error> {
-        let polygons: Vec<Polygon> = self
+impl TryFrom<GmlMultiSurface> for MultiSurface {
+    type Error = Error;
+
+    fn try_from(value: GmlMultiSurface) -> Result<Self, Self::Error> {
+        let id: Id = value.id.clone().try_into().ok().unwrap_or_else(|| {
+            let mut hasher = DefaultHasher::new();
+            value.hash(&mut hasher);
+            Id::from_hashed_u64(hasher.finish())
+        });
+        let gml = Gml::new(id);
+
+        let polygons: Vec<Polygon> = value
             .members
             .into_iter()
             .flat_map(|x| x.polygon)
-            .map(|x| x.to_polygon())
+            .map(|x| x.try_into())
             .collect::<Result<Vec<_>, _>>()?;
 
-        let multi_surface = MultiSurface::new(polygons)?;
+        let multi_surface = MultiSurface::new(gml, polygons)?;
         Ok(multi_surface)
     }
 }
 
 pub fn parse_multi_surface(source_text: &str) -> Result<MultiSurface, Error> {
     let parsed_geometry: GmlMultiSurface = de::from_str(source_text)?;
-    let multi_surface = parsed_geometry.to_multi_surface()?;
-    Ok(multi_surface)
+    parsed_geometry.try_into()
 }
 
 #[cfg(test)]
@@ -176,7 +188,7 @@ mod tests {
 
         let result = parse_multi_surface(source_text).unwrap();
 
-        assert_eq!(result.members().len(), 1);
+        assert_eq!(result.surface_member().len(), 1);
     }
 
     #[test]
@@ -193,6 +205,8 @@ mod tests {
               </gml:surfaceMember>
             </gml:MultiSurface>";
 
-        let _result = parse_multi_surface(source_text).unwrap();
+        let result = parse_multi_surface(source_text).unwrap();
+
+        assert_eq!(result.surface_member().len(), 1);
     }
 }

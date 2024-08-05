@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Supplementary operations for GML data."
 
 [dependencies]
-egml-core = { version = "0.0.1-alpha.3", path = "../egml-core" }
+egml-core = { version = "0.0.1-alpha.4", path = "../egml-core" }
 
 thiserror = { workspace = true }
 nalgebra = { workspace = true }
