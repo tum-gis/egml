@@ -1,10 +1,10 @@
 use crate::error::Error;
 use nalgebra::Isometry3;
 
+use crate::Error::ContainsEqualElements;
 use crate::model::geometry::DirectPosition;
 use crate::operations::geometry::Geometry;
 use crate::operations::surface::Surface;
-use crate::Error::ContainsEqualElements;
 use parry3d_f64::query::PointQuery;
 
 #[derive(Debug, Clone, PartialEq)]

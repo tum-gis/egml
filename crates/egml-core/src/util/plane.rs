@@ -1,5 +1,5 @@
-use crate::model::geometry::DirectPosition;
 use crate::Error;
+use crate::model::geometry::DirectPosition;
 use nalgebra::Vector3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

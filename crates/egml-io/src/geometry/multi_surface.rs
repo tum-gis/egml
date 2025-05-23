@@ -6,10 +6,17 @@ use crate::geometry::polygon::GmlPolygon;
 use egml_core::model::base::{Gml, Id};
 use egml_core::model::geometry::{MultiSurface, Polygon};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+pub struct GmlMultiSurfaceProperty {
+    #[serde(rename = "$value")]
+    pub multi_surface: Option<GmlMultiSurface>,
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename = "gml:MultiSurface")]
-struct GmlMultiSurface {
+pub struct GmlMultiSurface {
     #[serde(rename = "@id", default)]
     id: String,
     #[serde(rename = "$value")]
@@ -40,8 +47,18 @@ impl TryFrom<GmlMultiSurface> for MultiSurface {
             .members
             .into_iter()
             .flat_map(|x| x.polygon)
-            .map(|x| x.try_into())
-            .collect::<Result<Vec<_>, _>>()?;
+            .flat_map(|x| {
+                let polygon_id = x.id.clone();
+                x.try_into()
+                    .map_err(|e| {
+                        warn!(
+                            "Error during parsing of gml:Polygon with id={}: {}",
+                            &polygon_id, e
+                        );
+                    })
+                    .ok()
+            })
+            .collect();
 
         let multi_surface = MultiSurface::new(gml, polygons)?;
         Ok(multi_surface)

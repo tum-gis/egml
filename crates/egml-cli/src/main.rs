@@ -1,3 +1,5 @@
+mod cli;
+
 use egml::model::base::{Gml, Id};
 use egml::model::geometry::{DirectPosition, LinearRing};
 use tracing::info;

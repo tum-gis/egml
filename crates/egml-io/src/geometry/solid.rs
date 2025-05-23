@@ -1,9 +1,9 @@
 use quick_xml::de;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
+use crate::GmlSurfaceMember;
 use crate::error::Error;
 use crate::error::Error::MissingElements;
-use crate::GmlSurfaceMember;
 use egml_core::model::base::{Gml, Id};
 use egml_core::model::geometry::{LinearRing, Solid};
 use serde::{Deserialize, Serialize};

@@ -1,12 +1,11 @@
 use crate::error::Error;
 use crate::error::Error::NotEnoughElements;
-use itertools::Itertools;
 
+use crate::Error::{ContainsDuplicateElements, ContainsEqualStartAndLastElement};
 use crate::model::base::Gml;
 use crate::model::geometry::DirectPosition;
 use crate::operations::geometry::Geometry;
 use crate::operations::surface::Surface;
-use crate::Error::{ContainsDuplicateElements, ContainsEqualStartAndLastElement};
 use nalgebra::Isometry3;
 use rayon::prelude::*;
 
@@ -26,7 +25,7 @@ impl LinearRing {
         }
         if points.len() < MINIMUM_NUMBER_OF_POINTS {
             return Err(NotEnoughElements(
-                "Linear ring must at least have three points (without duplicates)",
+                "Linear ring must at least have three unique points",
             ));
         }
         if points.first().expect("") == points.last().expect("") {
@@ -36,11 +35,14 @@ impl LinearRing {
         Ok(Self { gml, points })
     }
 
-    pub fn set_points(&mut self, mut val: Vec<DirectPosition>) -> Result<(), Error> {
-        val.dedup();
+    pub fn set_points(&mut self, val: Vec<DirectPosition>) -> Result<(), Error> {
+        let duplicates_count = val.windows(2).filter(|x| x[0] == x[1]).count();
+        if duplicates_count >= 1 {
+            return Err(ContainsDuplicateElements);
+        }
         if val.len() < MINIMUM_NUMBER_OF_POINTS {
             return Err(NotEnoughElements(
-                "Linear ring must at least have three points (without duplicates)",
+                "Linear ring must at least have three unique points",
             ));
         }
         self.points = val;

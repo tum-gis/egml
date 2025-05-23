@@ -1,5 +1,5 @@
-use egml_core::model::base::Id;
 use egml_core::Error::MustNotBeEmpty;
+use egml_core::model::base::Id;
 
 #[test]
 fn id_from_empty_string() {

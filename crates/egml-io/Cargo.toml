@@ -17,3 +17,4 @@ quick-xml = { workspace = true, features = ["serialize"] }
 nalgebra = { workspace = true }
 # parry3d-f64 = { workspace = true, features = ["f64"] }
 sha2 = { workspace = true }
+tracing = { workspace = true }

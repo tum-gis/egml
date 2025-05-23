@@ -1,6 +1,6 @@
 use crate::model::base::Id;
 
-#[derive(Debug, Clone, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Gml {
     pub id: Id,
     pub name: Vec<String>,

@@ -1,8 +1,8 @@
+use crate::Error;
 use crate::model::base::Gml;
 use crate::model::geometry::{DirectPosition, Envelope, LinearRing};
 use crate::operations::geometry::Geometry;
 use crate::operations::surface::Surface;
-use crate::Error;
 use nalgebra::Isometry3;
 use rayon::prelude::*;
 
