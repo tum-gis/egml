@@ -8,6 +8,6 @@ repository.workspace = true
 description = "Library for processing GML data."
 
 [dependencies]
-egml-core = { version = "0.0.1-alpha.4", path = "../egml-core" }
-egml-io = { version = "0.0.1-alpha.4", path = "../egml-io" }
-egml-transform = { version = "0.0.1-alpha.4", path = "../egml-transform" }
+egml-core = { version = "0.0.1-alpha.5", path = "../egml-core" }
+egml-io = { version = "0.0.1-alpha.5", path = "../egml-io" }
+egml-transform = { version = "0.0.1-alpha.5", path = "../egml-transform" }
