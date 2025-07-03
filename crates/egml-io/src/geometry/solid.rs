@@ -54,8 +54,8 @@ impl TryFrom<GmlSolid> for Solid {
             .flat_map(|x| x.polygon)
             .map(|x| x.exterior)
             .flat_map(|x| x.linear_ring)
-            .map(|x| x.try_into().unwrap())
-            .collect();
+            .map(|x| x.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
 
         let solid = Solid::new(gml, linear_rings)?;
         Ok(solid)
