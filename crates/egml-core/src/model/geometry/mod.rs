@@ -9,5 +9,6 @@ pub use self::envelope::*;
 pub use self::primitives::linear_ring::*;
 pub use self::primitives::polygon::*;
 pub use self::primitives::solid::*;
+pub use self::primitives::surface::*;
 pub use self::primitives::triangle::*;
 pub use self::primitives::triangulated_surface::*;

@@ -1,6 +1,6 @@
 use crate::error::Error;
 use crate::model::base::Gml;
-use crate::model::geometry::{DirectPosition, LinearRing};
+use crate::model::geometry::{DirectPosition, SurfaceProperty};
 use crate::operations::geometry::Geometry;
 use nalgebra::Isometry3;
 use rayon::prelude::*;
@@ -8,11 +8,11 @@ use rayon::prelude::*;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Solid {
     pub gml: Gml,
-    members: Vec<LinearRing>,
+    members: Vec<SurfaceProperty>,
 }
 
 impl Solid {
-    pub fn new(gml: Gml, members: Vec<LinearRing>) -> Result<Self, Error> {
+    pub fn new(gml: Gml, members: Vec<SurfaceProperty>) -> Result<Self, Error> {
         if members.is_empty() {
             return Err(Error::MustNotBeEmpty("solid"));
         }
@@ -20,11 +20,11 @@ impl Solid {
         Ok(Self { gml, members })
     }
 
-    pub fn members(&self) -> &Vec<LinearRing> {
+    pub fn members(&self) -> &Vec<SurfaceProperty> {
         self.members.as_ref()
     }
 
-    pub fn set_members(&mut self, val: Vec<LinearRing>) -> Result<(), Error> {
+    pub fn set_members(&mut self, val: Vec<SurfaceProperty>) -> Result<(), Error> {
         if val.is_empty() {
             return Err(Error::MustNotBeEmpty("solid"));
         }

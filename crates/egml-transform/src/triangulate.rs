@@ -59,6 +59,7 @@ pub fn triangulate_solid(solid: &Solid) -> Result<Vec<TriangulatedSurface>, Erro
     let triangulated_surfaces: Vec<TriangulatedSurface> = solid
         .members()
         .iter()
+        .flat_map(|x| &x.linear_ring)
         .map(triangulate_linear_ring)
         .collect::<Result<Vec<TriangulatedSurface>, Error>>()?;
 

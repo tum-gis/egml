@@ -5,7 +5,7 @@ use crate::GmlSurfaceMember;
 use crate::error::Error;
 use crate::error::Error::MissingElements;
 use egml_core::model::base::{Gml, Id};
-use egml_core::model::geometry::{LinearRing, Solid};
+use egml_core::model::geometry::{Solid, SurfaceProperty};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
@@ -44,20 +44,17 @@ impl TryFrom<GmlSolid> for Solid {
         });
         let gml = Gml::new(id);
 
-        let linear_rings: Vec<LinearRing> = value
+        let surface_properties: Vec<SurfaceProperty> = value
             .exterior
             .ok_or(MissingElements())?
             .shell
             .ok_or(MissingElements())?
             .members
             .into_iter()
-            .flat_map(|x| x.polygon)
-            .map(|x| x.exterior)
-            .flat_map(|x| x.linear_ring)
             .map(|x| x.try_into())
             .collect::<Result<Vec<_>, _>>()?;
 
-        let solid = Solid::new(gml, linear_rings)?;
+        let solid = Solid::new(gml, surface_properties)?;
         Ok(solid)
     }
 }
@@ -102,6 +99,24 @@ mod tests {
         let solid_geometry = parse_solid(source_text).unwrap();
 
         assert_eq!(solid_geometry.members().len(), 2);
+    }
+
+    #[test]
+    fn parsing_solid_xlink_members() {
+        let source_text = "\
+        <gml:Solid srsDimension=\"3\">
+          <gml:exterior>
+            <gml:Shell>
+              <gml:surfaceMember xlink:href=\"#DEBY_LOD2_59772_4becb506-d53b-44ca-a483-e6a3d238b4c2_2_poly\"/>
+              <gml:surfaceMember xlink:href=\"#DEBY_LOD2_59772_be3462c3-9865-467b-829d-76e6b9b692e7_2_poly\"/>
+              <gml:surfaceMember xlink:href=\"#DEBY_LOD2_59772_c0aae462-3f4b-4062-80bb-8cd04768ab1a_2_poly\"/>
+            </gml:Shell>
+          </gml:exterior>
+        </gml:Solid>";
+
+        let solid_geometry = parse_solid(source_text).unwrap();
+
+        assert_eq!(solid_geometry.members().len(), 3);
     }
 
     #[test]

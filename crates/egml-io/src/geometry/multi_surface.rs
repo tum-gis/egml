@@ -4,7 +4,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::geometry::polygon::GmlPolygon;
 use egml_core::model::base::{Gml, Id};
-use egml_core::model::geometry::{MultiSurface, Polygon};
+use egml_core::model::geometry::{LinearRing, MultiSurface, Polygon, SurfaceProperty};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -30,6 +30,20 @@ pub struct GmlSurfaceMember {
     href: String,
     #[serde(rename = "$value")]
     pub polygon: Option<GmlPolygon>,
+}
+
+impl TryFrom<GmlSurfaceMember> for SurfaceProperty {
+    type Error = Error;
+
+    fn try_from(value: GmlSurfaceMember) -> Result<Self, Self::Error> {
+        let linear_ring: Option<LinearRing> = value
+            .polygon
+            .and_then(|x| x.exterior.linear_ring)
+            .and_then(|gml_ring| gml_ring.try_into().ok());
+
+        let surface_property = SurfaceProperty::new(value.href, linear_ring)?;
+        Ok(surface_property)
+    }
 }
 
 impl TryFrom<GmlMultiSurface> for MultiSurface {
