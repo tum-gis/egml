@@ -6,7 +6,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.0.1-alpha.7"
+version = "0.0.1-alpha.8"
 authors = ["Benedikt Schwab <benedikt.schwab@gmail.com>"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -14,15 +14,17 @@ repository = "https://github.com/envis-space/egml"
 
 [workspace.dependencies]
 thiserror = "2.0.12"
+anyhow = "1.0.98"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
-nalgebra = "0.33.2"
-parry3d-f64 = "0.21.1"
+nalgebra = "0.34.0"
+parry3d-f64 = "0.22.0"
 serde = "1.0.219"
-quick-xml = "0.38.0"
+quick-xml = "0.38.1"
 geo = "0.30.0"
 itertools = "0.14.0"
 rayon = "1.10.0"
 approx = "0.5.1"
 uuid = "1.17.0"
 sha2 = "0.10.9"
+earcut = "0.4.4"

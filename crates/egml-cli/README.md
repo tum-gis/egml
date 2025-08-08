@@ -1,6 +1,6 @@
 # egml-cli
 
-CLI tool for processing [GML](https://www.ogc.org/standard/gml/) data.
+CLI tool for processing [GML](https://www.ogc.org/standards/gml/) data.
 
 The library is at an early stage of development.
 

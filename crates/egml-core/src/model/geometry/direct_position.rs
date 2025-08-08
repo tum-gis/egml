@@ -31,8 +31,8 @@ impl DirectPosition {
         self.z
     }
 
-    pub fn coords(&self) -> Vec<f64> {
-        vec![self.x, self.y, self.z]
+    pub fn coords(&self) -> [f64; 3] {
+        [self.x, self.y, self.z]
     }
 
     pub fn set_x(&mut self, val: f64) -> Result<(), Error> {
@@ -134,6 +134,24 @@ impl From<DirectPosition> for nalgebra::Point3<f32> {
 impl From<nalgebra::Point3<f64>> for DirectPosition {
     fn from(item: nalgebra::Point3<f64>) -> Self {
         // TODO: how to handle error?
+        Self::new(item.x, item.y, item.z).expect("Should work")
+    }
+}
+
+impl From<DirectPosition> for parry3d_f64::math::Point<f64> {
+    fn from(item: DirectPosition) -> Self {
+        Self::new(item.x, item.y, item.z)
+    }
+}
+
+impl From<DirectPosition> for parry3d_f64::math::Point<f32> {
+    fn from(item: DirectPosition) -> Self {
+        Self::new(item.x as f32, item.y as f32, item.z as f32)
+    }
+}
+
+impl From<parry3d_f64::math::Point<f64>> for DirectPosition {
+    fn from(item: parry3d_f64::math::Point<f64>) -> Self {
         Self::new(item.x, item.y, item.z).expect("Should work")
     }
 }

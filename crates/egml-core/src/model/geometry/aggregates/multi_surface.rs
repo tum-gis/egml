@@ -1,7 +1,8 @@
 use crate::error::Error;
 use crate::model::base::Gml;
-use crate::model::geometry::{DirectPosition, Polygon};
+use crate::model::geometry::{DirectPosition, Polygon, TriangulatedSurface};
 use crate::operations::geometry::Geometry;
+use crate::operations::triangulate::Triangulate;
 use nalgebra::Isometry3;
 use rayon::prelude::*;
 
@@ -48,5 +49,19 @@ impl Geometry for MultiSurface {
         self.surface_member.par_iter_mut().for_each(|p| {
             p.apply_transform(m);
         });
+    }
+}
+
+impl Triangulate for MultiSurface {
+    fn triangulate(&self) -> Result<TriangulatedSurface, Error> {
+        let triangulated_surfaces: Vec<TriangulatedSurface> = self
+            .surface_member
+            .iter()
+            .map(|x| x.triangulate())
+            .collect::<Result<Vec<TriangulatedSurface>, Error>>()?;
+
+        let combined_triangulated_surface =
+            TriangulatedSurface::from_triangulated_surfaces(triangulated_surfaces)?;
+        Ok(combined_triangulated_surface)
     }
 }

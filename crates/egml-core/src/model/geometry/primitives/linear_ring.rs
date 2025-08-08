@@ -3,9 +3,10 @@ use crate::error::Error::NotEnoughElements;
 
 use crate::Error::{ContainsDuplicateElements, ContainsEqualStartAndLastElement};
 use crate::model::base::Gml;
-use crate::model::geometry::DirectPosition;
+use crate::model::geometry::{DirectPosition, Triangle, TriangulatedSurface};
 use crate::operations::geometry::Geometry;
 use crate::operations::surface::Surface;
+use crate::operations::triangulate::Triangulate;
 use nalgebra::Isometry3;
 use rayon::prelude::*;
 
@@ -66,5 +67,57 @@ impl Geometry for LinearRing {
 impl Surface for LinearRing {
     fn outer_boundary_points(&self) -> Vec<&DirectPosition> {
         self.points.iter().collect()
+    }
+}
+
+impl Triangulate for LinearRing {
+    fn triangulate(&self) -> Result<TriangulatedSurface, Error> {
+        let vertices_3d = self.points.iter().map(|p| p.coords()).collect::<Vec<_>>();
+        let mut vertices_2d_buf = Vec::new();
+        earcut::utils3d::project3d_to_2d(&vertices_3d, vertices_3d.len(), &mut vertices_2d_buf);
+
+        let mut triangle_indices: Vec<usize> = vec![];
+        let mut earcut = earcut::Earcut::new();
+        earcut.earcut(vertices_2d_buf.iter().copied(), &[], &mut triangle_indices);
+
+        let triangles: Vec<Triangle> = triangle_indices
+            .chunks(3)
+            .map(|x| {
+                let vertex_a = self.points[x[0]];
+                let vertex_b = self.points[x[1]];
+                let vertex_c = self.points[x[2]];
+                Triangle::new(vertex_a, vertex_b, vertex_c).expect("should work")
+            })
+            .collect::<Vec<_>>();
+
+        let triangulated_surface = TriangulatedSurface::new(triangles)?;
+        Ok(triangulated_surface)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::model::base::Id;
+
+    #[test]
+    fn triangulate() {
+        let gml = Gml::new(Id::try_from("test_id").expect("must work"));
+        let linear_ring = LinearRing::new(
+            gml,
+            vec![
+                DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+                DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
+                DirectPosition::new(1.0, 1.0, 0.0).unwrap(),
+                DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
+            ],
+        )
+        .unwrap();
+
+        let result = &linear_ring.triangulate().unwrap();
+
+        assert_eq!(result.number_of_patches(), 2);
+        assert!(result.patches()[0].area() > 0.0);
+        assert!(result.patches()[1].area() > 0.0);
     }
 }

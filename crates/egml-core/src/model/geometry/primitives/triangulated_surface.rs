@@ -18,6 +18,21 @@ impl TriangulatedSurface {
         Ok(TriangulatedSurface { patches })
     }
 
+    pub fn from_triangulated_surfaces(surfaces: Vec<TriangulatedSurface>) -> Result<Self, Error> {
+        if surfaces.is_empty() {
+            return Err(Error::MustNotBeEmpty("surfaces to combine"));
+        }
+
+        let total_patches: Vec<Triangle> = surfaces
+            .into_iter()
+            .flat_map(|surface| surface.patches)
+            .collect();
+
+        Ok(TriangulatedSurface {
+            patches: total_patches,
+        })
+    }
+
     pub fn patches(&self) -> &Vec<Triangle> {
         self.patches.as_ref()
     }

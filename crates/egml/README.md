@@ -1,6 +1,6 @@
 # egml
 
-Library for processing [GML](https://www.ogc.org/standard/gml/) data.
+Library for processing [GML](https://www.ogc.org/standards/gml/) data.
 
 The library is at an early stage of development.
 

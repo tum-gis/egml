@@ -1,6 +1,6 @@
 # egml-io
 
-IO operations for processing [GML](https://www.ogc.org/standard/gml/) data.
+IO operations for processing [GML](https://www.ogc.org/standards/gml/) data.
 
 The library is at an early stage of development.
 
