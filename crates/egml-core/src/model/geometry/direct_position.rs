@@ -137,21 +137,3 @@ impl From<nalgebra::Point3<f64>> for DirectPosition {
         Self::new(item.x, item.y, item.z).expect("Should work")
     }
 }
-
-impl From<DirectPosition> for parry3d_f64::math::Point<f64> {
-    fn from(item: DirectPosition) -> Self {
-        Self::new(item.x, item.y, item.z)
-    }
-}
-
-impl From<DirectPosition> for parry3d_f64::math::Point<f32> {
-    fn from(item: DirectPosition) -> Self {
-        Self::new(item.x as f32, item.y as f32, item.z as f32)
-    }
-}
-
-impl From<parry3d_f64::math::Point<f64>> for DirectPosition {
-    fn from(item: parry3d_f64::math::Point<f64>) -> Self {
-        Self::new(item.x, item.y, item.z).expect("Should work")
-    }
-}

@@ -34,7 +34,7 @@ impl TryFrom<GmlPos> for DirectPosition {
             .split_whitespace()
             .map(|s| s.parse().unwrap())
             .collect();
-        if parsed_values.len() % 3 != 0 {
+        if !parsed_values.len().is_multiple_of(3) {
             return Err(MissingElements());
         }
 
