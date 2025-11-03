@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::model::base::Gml;
+use crate::model::base::AbstractGml;
 use crate::model::geometry::{DirectPosition, Polygon, TriangulatedSurface};
 use crate::operations::geometry::Geometry;
 use crate::operations::triangulate::Triangulate;
@@ -8,18 +8,18 @@ use rayon::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MultiSurface {
-    pub gml: Gml,
+    pub abstract_gml: AbstractGml,
     surface_member: Vec<Polygon>,
 }
 
 impl MultiSurface {
-    pub fn new(gml: Gml, members: Vec<Polygon>) -> Result<Self, Error> {
+    pub fn new(abstract_gml: AbstractGml, members: Vec<Polygon>) -> Result<Self, Error> {
         if members.is_empty() {
             return Err(Error::MustNotBeEmpty("multi surface"));
         }
 
         Ok(Self {
-            gml,
+            abstract_gml,
             surface_member: members,
         })
     }

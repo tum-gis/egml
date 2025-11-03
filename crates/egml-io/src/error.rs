@@ -5,7 +5,9 @@ pub enum Error {
     #[error(transparent)]
     GmlError(#[from] egml_core::Error),
     #[error(transparent)]
-    Io(#[from] quick_xml::DeError),
+    QuickXmlError(#[from] quick_xml::Error),
+    #[error(transparent)]
+    QuickXmlDeError(#[from] quick_xml::DeError),
 
     #[error("the data for key `{0}` is not available")]
     ElementNotFound(String),

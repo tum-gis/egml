@@ -4,7 +4,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use crate::GmlSurfaceMember;
 use crate::error::Error;
 use crate::error::Error::MissingElements;
-use egml_core::model::base::{Gml, Id};
+use egml_core::model::base::{AbstractGml, Id};
 use egml_core::model::geometry::{Solid, SurfaceProperty};
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +42,7 @@ impl TryFrom<GmlSolid> for Solid {
             value.hash(&mut hasher);
             Id::from_hashed_u64(hasher.finish())
         });
-        let gml = Gml::new(id);
+        let abstract_gml = AbstractGml::new(id);
 
         let surface_properties: Vec<SurfaceProperty> = value
             .exterior
@@ -54,7 +54,7 @@ impl TryFrom<GmlSolid> for Solid {
             .map(|x| x.try_into())
             .collect::<Result<Vec<_>, _>>()?;
 
-        let solid = Solid::new(gml, surface_properties)?;
+        let solid = Solid::new(abstract_gml, surface_properties)?;
         Ok(solid)
     }
 }

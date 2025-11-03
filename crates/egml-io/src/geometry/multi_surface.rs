@@ -3,7 +3,7 @@ use quick_xml::de;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::geometry::polygon::GmlPolygon;
-use egml_core::model::base::{Gml, Id};
+use egml_core::model::base::{AbstractGml, Id};
 use egml_core::model::geometry::{LinearRing, MultiSurface, Polygon, SurfaceProperty};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -55,7 +55,7 @@ impl TryFrom<GmlMultiSurface> for MultiSurface {
             value.hash(&mut hasher);
             Id::from_hashed_u64(hasher.finish())
         });
-        let gml = Gml::new(id);
+        let abstract_gml = AbstractGml::new(id);
 
         let polygons: Vec<Polygon> = value
             .members
@@ -74,7 +74,7 @@ impl TryFrom<GmlMultiSurface> for MultiSurface {
             })
             .collect();
 
-        let multi_surface = MultiSurface::new(gml, polygons)?;
+        let multi_surface = MultiSurface::new(abstract_gml, polygons)?;
         Ok(multi_surface)
     }
 }

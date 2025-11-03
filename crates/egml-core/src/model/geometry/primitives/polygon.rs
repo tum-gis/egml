@@ -1,5 +1,5 @@
 use crate::Error;
-use crate::model::base::Gml;
+use crate::model::base::AbstractGml;
 use crate::model::geometry::{DirectPosition, Envelope, LinearRing, Triangle, TriangulatedSurface};
 use crate::operations::geometry::Geometry;
 use crate::operations::surface::Surface;
@@ -9,15 +9,19 @@ use rayon::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Polygon {
-    pub gml: Gml,
+    pub abstract_gml: AbstractGml,
     pub exterior: LinearRing,
     pub interior: Vec<LinearRing>,
 }
 
 impl Polygon {
-    pub fn new(gml: Gml, exterior: LinearRing, interior: Vec<LinearRing>) -> Result<Self, Error> {
+    pub fn new(
+        abstract_gml: AbstractGml,
+        exterior: LinearRing,
+        interior: Vec<LinearRing>,
+    ) -> Result<Self, Error> {
         Ok(Self {
-            gml,
+            abstract_gml,
             exterior,
             interior,
         })
@@ -110,9 +114,10 @@ mod test {
 
     #[test]
     fn test_polygon_triangulation() {
-        let gml = Gml::new("exterior_linear_ring_id".to_string().try_into().unwrap());
+        let abstract_gml =
+            AbstractGml::new("exterior_linear_ring_id".to_string().try_into().unwrap());
         let linear_ring_exterior = LinearRing::new(
-            gml,
+            abstract_gml,
             vec![
                 DirectPosition::new(0.0, 0.0, 0.0).expect("should work"),
                 DirectPosition::new(1.0, 0.0, 0.0).expect("should work"),
@@ -122,17 +127,19 @@ mod test {
         )
         .expect("should work");
 
-        let gml = Gml::new("polygon_id".to_string().try_into().unwrap());
-        let polygon = Polygon::new(gml, linear_ring_exterior, vec![]).expect("should work");
+        let abstract_gml = AbstractGml::new("polygon_id".to_string().try_into().unwrap());
+        let polygon =
+            Polygon::new(abstract_gml, linear_ring_exterior, vec![]).expect("should work");
         let triangulated_surface = polygon.triangulate().expect("should work");
         assert_eq!(triangulated_surface.number_of_patches(), 2);
     }
 
     #[test]
     fn test_polygon_with_interior_triangulation() {
-        let gml = Gml::new("exterior_linear_ring_id".to_string().try_into().unwrap());
+        let abstract_gml =
+            AbstractGml::new("exterior_linear_ring_id".to_string().try_into().unwrap());
         let linear_ring_exterior = LinearRing::new(
-            gml,
+            abstract_gml,
             vec![
                 DirectPosition::new(0.0, 0.0, 0.0).expect("should work"),
                 DirectPosition::new(1.0, 0.0, 0.0).expect("should work"),
@@ -144,9 +151,10 @@ mod test {
         )
         .expect("should work");
 
-        let gml = Gml::new("interior_linear_ring_id".to_string().try_into().unwrap());
+        let abstract_gml =
+            AbstractGml::new("interior_linear_ring_id".to_string().try_into().unwrap());
         let linear_ring_interior = LinearRing::new(
-            gml,
+            abstract_gml,
             vec![
                 DirectPosition::new(0.5, 0.0, 0.0).expect("should work"),
                 DirectPosition::new(1.0, 0.0, 0.0).expect("should work"),
@@ -156,9 +164,9 @@ mod test {
         )
         .expect("should work");
 
-        let gml = Gml::new("polygon_id".to_string().try_into().unwrap());
+        let abstract_gml = AbstractGml::new("polygon_id".to_string().try_into().unwrap());
         let polygon = Polygon::new(
-            gml,
+            abstract_gml,
             linear_ring_exterior,
             vec![linear_ring_interior.clone(), linear_ring_interior.clone()],
         )

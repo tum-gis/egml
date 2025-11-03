@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::model::base::Gml;
+use crate::model::base::AbstractGml;
 use crate::model::geometry::{DirectPosition, SurfaceProperty, TriangulatedSurface};
 use crate::operations::geometry::Geometry;
 use crate::operations::triangulate::Triangulate;
@@ -8,17 +8,20 @@ use rayon::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Solid {
-    pub gml: Gml,
+    pub abstract_gml: AbstractGml,
     members: Vec<SurfaceProperty>,
 }
 
 impl Solid {
-    pub fn new(gml: Gml, members: Vec<SurfaceProperty>) -> Result<Self, Error> {
+    pub fn new(abstract_gml: AbstractGml, members: Vec<SurfaceProperty>) -> Result<Self, Error> {
         if members.is_empty() {
             return Err(Error::MustNotBeEmpty("solid"));
         }
 
-        Ok(Self { gml, members })
+        Ok(Self {
+            abstract_gml,
+            members,
+        })
     }
 
     pub fn members(&self) -> &Vec<SurfaceProperty> {

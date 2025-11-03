@@ -1,5 +1,5 @@
-mod gml;
+mod abstract_gml;
 mod id;
 
-pub use self::gml::*;
+pub use self::abstract_gml::*;
 pub use self::id::*;

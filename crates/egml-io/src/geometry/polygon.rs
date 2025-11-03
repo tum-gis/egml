@@ -1,5 +1,5 @@
 use crate::{Error, GmlLinearRing};
-use egml_core::model::base::{Gml, Id};
+use egml_core::model::base::{AbstractGml, Id};
 use egml_core::model::geometry::{LinearRing, Polygon};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
@@ -33,7 +33,7 @@ impl TryFrom<GmlPolygon> for Polygon {
             value.hash(&mut hasher);
             Id::from_hashed_u64(hasher.finish())
         });
-        let gml = Gml::new(id);
+        let abstract_gml = AbstractGml::new(id);
 
         let exterior: LinearRing = value.exterior.linear_ring.unwrap().try_into()?;
         let interior: Vec<LinearRing> = value
@@ -53,7 +53,7 @@ impl TryFrom<GmlPolygon> for Polygon {
             })
             .collect();
 
-        let polygon = Polygon::new(gml, exterior, interior)?;
+        let polygon = Polygon::new(abstract_gml, exterior, interior)?;
         Ok(polygon)
     }
 }

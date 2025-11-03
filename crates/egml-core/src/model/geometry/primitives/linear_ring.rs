@@ -2,7 +2,7 @@ use crate::error::Error;
 use crate::error::Error::NotEnoughElements;
 
 use crate::Error::{ContainsDuplicateElements, ContainsEqualStartAndLastElement};
-use crate::model::base::Gml;
+use crate::model::base::AbstractGml;
 use crate::model::geometry::{DirectPosition, Triangle, TriangulatedSurface};
 use crate::operations::geometry::Geometry;
 use crate::operations::surface::Surface;
@@ -14,12 +14,12 @@ const MINIMUM_NUMBER_OF_POINTS: usize = 3;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinearRing {
-    pub gml: Gml,
+    pub abstract_gml: AbstractGml,
     points: Vec<DirectPosition>,
 }
 
 impl LinearRing {
-    pub fn new(gml: Gml, points: Vec<DirectPosition>) -> Result<Self, Error> {
+    pub fn new(abstract_gml: AbstractGml, points: Vec<DirectPosition>) -> Result<Self, Error> {
         let duplicates_count = points.windows(2).filter(|x| x[0] == x[1]).count();
         if duplicates_count >= 1 {
             return Err(ContainsDuplicateElements);
@@ -33,7 +33,10 @@ impl LinearRing {
             return Err(ContainsEqualStartAndLastElement);
         }
 
-        Ok(Self { gml, points })
+        Ok(Self {
+            abstract_gml,
+            points,
+        })
     }
 
     pub fn set_points(&mut self, val: Vec<DirectPosition>) -> Result<(), Error> {
@@ -102,9 +105,9 @@ mod test {
 
     #[test]
     fn triangulate() {
-        let gml = Gml::new(Id::try_from("test_id").expect("must work"));
+        let abstract_gml = AbstractGml::new(Id::try_from("test_id").expect("must work"));
         let linear_ring = LinearRing::new(
-            gml,
+            abstract_gml,
             vec![
                 DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
                 DirectPosition::new(1.0, 0.0, 0.0).unwrap(),

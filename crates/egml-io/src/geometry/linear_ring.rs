@@ -2,7 +2,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::error::Error;
 use crate::error::Error::{MissingElements, Only3DSupported};
-use egml_core::model::base::{Gml, Id};
+use egml_core::model::base::{AbstractGml, Id};
 use egml_core::model::geometry::{DirectPosition, LinearRing};
 use serde::{Deserialize, Serialize};
 
@@ -66,7 +66,7 @@ impl TryFrom<GmlLinearRing> for LinearRing {
             value.hash(&mut hasher);
             Id::from_hashed_u64(hasher.finish())
         });
-        let gml = Gml::new(id);
+        let abstract_gml = AbstractGml::new(id);
 
         let pos_list: GmlPosList = value
             .pos_list
@@ -74,7 +74,7 @@ impl TryFrom<GmlLinearRing> for LinearRing {
             .unwrap();
         let points: Vec<DirectPosition> = pos_list.try_into()?;
 
-        let linear_ring = LinearRing::new(gml, points)?;
+        let linear_ring = LinearRing::new(abstract_gml, points)?;
         Ok(linear_ring)
     }
 }
