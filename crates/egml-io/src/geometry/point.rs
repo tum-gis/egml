@@ -3,6 +3,7 @@ use crate::error::Error::{MissingElements, Only3DSupported};
 use egml_core::model::geometry::DirectPosition;
 use quick_xml::de;
 use serde::{Deserialize, Serialize};
+use std::io::BufRead;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename = "gml:Point")]
@@ -43,8 +44,8 @@ impl TryFrom<GmlPos> for DirectPosition {
     }
 }
 
-pub fn parse_point(source_text: &str) -> Result<DirectPosition, Error> {
-    let parsed_point: GmlPoint = de::from_str(source_text)?;
+pub fn parse_point<T: BufRead>(source: T) -> Result<DirectPosition, Error> {
+    let parsed_point: GmlPoint = de::from_reader(source)?;
     parsed_point.pos.try_into()
 }
 
@@ -58,7 +59,11 @@ mod tests {
               <gml:pos srsDimension=\"3\" gml:id=\"UUID_6b33ecfa-6e08-4e8e-a4b5-e1d06540faf0\">678000.9484065345 5403659.060043676 417.3802376791456</gml:pos>
             </gml:Point>";
 
-        let _result = parse_point(source_text).unwrap();
+        let result = parse_point(source_text.as_ref()).unwrap();
+
+        assert_eq!(result.x(), 678000.9484065345);
+        assert_eq!(result.y(), 5403659.060043676);
+        assert_eq!(result.z(), 417.3802376791456);
     }
 
     #[test]
@@ -67,6 +72,10 @@ mod tests {
               <gml:pos srsDimension=\"3\">678000.9484065345 5403659.060043676 417.3802376791456</gml:pos>
             </gml:Point>";
 
-        let _result = parse_point(source_text).unwrap();
+        let result = parse_point(source_text.as_ref()).unwrap();
+
+        assert_eq!(result.x(), 678000.9484065345);
+        assert_eq!(result.y(), 5403659.060043676);
+        assert_eq!(result.z(), 417.3802376791456);
     }
 }

@@ -1,5 +1,5 @@
 use crate::error::Error;
-use quick_xml::de;
+use quick_xml::{DeError, de};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::geometry::polygon::GmlPolygon;
@@ -28,6 +28,28 @@ pub struct GmlMultiSurface {
 pub struct GmlSurfaceMember {
     #[serde(rename = "@href", default)]
     href: String,
+
+    #[serde(rename = "$value")]
+    pub content: Option<GmlSurfaceMemberContent>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+pub enum GmlSurfaceMemberContent {
+    Polygon(GmlPolygon),
+    CompositeSurface(GmlCompositeSurface),
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[serde(rename = "gml:CompositeSurface")]
+pub struct GmlCompositeSurface {
+    #[serde(rename = "@id", default)]
+    id: String,
+    #[serde(rename = "$value")]
+    pub surface_members: Vec<GmlCompositeSurfaceMember>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+pub struct GmlCompositeSurfaceMember {
     #[serde(rename = "$value")]
     pub polygon: Option<GmlPolygon>,
 }
@@ -37,7 +59,14 @@ impl TryFrom<GmlSurfaceMember> for SurfaceProperty {
 
     fn try_from(value: GmlSurfaceMember) -> Result<Self, Self::Error> {
         let linear_ring: Option<LinearRing> = value
-            .polygon
+            .content
+            .and_then(|current_content| match current_content {
+                GmlSurfaceMemberContent::Polygon(x) => Some(x),
+                GmlSurfaceMemberContent::CompositeSurface(_) => {
+                    warn!("Found composite surface member in MultiSurface. Ignoring.");
+                    None
+                }
+            })
             .and_then(|x| x.exterior.linear_ring)
             .and_then(|gml_ring| gml_ring.try_into().ok());
 
@@ -60,7 +89,15 @@ impl TryFrom<GmlMultiSurface> for MultiSurface {
         let polygons: Vec<Polygon> = value
             .members
             .into_iter()
-            .flat_map(|x| x.polygon)
+            .flat_map(|x| x.content)
+            .flat_map(|content| match content {
+                GmlSurfaceMemberContent::CompositeSurface(composite) => composite
+                    .surface_members
+                    .into_iter()
+                    .flat_map(|member| member.polygon)
+                    .collect::<Vec<_>>(),
+                GmlSurfaceMemberContent::Polygon(polygon) => vec![polygon],
+            })
             .flat_map(|x| {
                 let polygon_id = x.id.clone();
                 x.try_into()
@@ -80,13 +117,54 @@ impl TryFrom<GmlMultiSurface> for MultiSurface {
 }
 
 pub fn parse_multi_surface(source_text: &str) -> Result<MultiSurface, Error> {
-    let parsed_geometry: GmlMultiSurface = de::from_str(source_text)?;
-    parsed_geometry.try_into()
+    let parsed_geometry: Result<GmlMultiSurface, DeError> = de::from_str(source_text);
+    parsed_geometry?.try_into()
 }
 
 #[cfg(test)]
 mod tests {
     use crate::parse_multi_surface;
+
+    #[test]
+    fn parsing_multi_surface_with_composite_surface_member() {
+        let source_text = "
+				<gml:MultiSurface srsDimension=\"3\">
+					<gml:surfaceMember>
+						<gml:CompositeSurface>
+							<gml:surfaceMember>
+								<gml:Polygon>
+									<gml:exterior>
+										<gml:LinearRing>
+											<gml:posList>314.531005859375 1043.4599609375 7.144559860229492 314.531005859375 1043.4599609375 2.6047298908233643 314.68798828125 1043.22998046875 2.6047298908233643 314.531005859375 1043.4599609375 7.144559860229492</gml:posList>
+										</gml:LinearRing>
+									</gml:exterior>
+								</gml:Polygon>
+							</gml:surfaceMember>
+							<gml:surfaceMember>
+								<gml:Polygon>
+									<gml:exterior>
+										<gml:LinearRing>
+											<gml:posList>314.531005859375 1043.4599609375 7.144559860229492 314.68798828125 1043.22998046875 2.6047298908233643 315.7770080566406 1041.6500244140625 2.6047298908233643 314.531005859375 1043.4599609375 7.144559860229492</gml:posList>
+										</gml:LinearRing>
+									</gml:exterior>
+								</gml:Polygon>
+							</gml:surfaceMember>
+							<gml:surfaceMember>
+								<gml:Polygon>
+									<gml:exterior>
+										<gml:LinearRing>
+											<gml:posList>314.531005859375 1043.4599609375 7.144559860229492 315.7770080566406 1041.6500244140625 2.6047298908233643 316.1080017089844 1041.1700439453125 7.144559860229492 314.531005859375 1043.4599609375 7.144559860229492</gml:posList>
+										</gml:LinearRing>
+									</gml:exterior>
+								</gml:Polygon>
+							</gml:surfaceMember>
+						</gml:CompositeSurface>
+					</gml:surfaceMember>
+				</gml:MultiSurface>
+			";
+
+        let _result = parse_multi_surface(source_text).unwrap();
+    }
 
     #[test]
     fn parsing_multi_surface() {
