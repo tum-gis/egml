@@ -14,5 +14,11 @@ pub enum Error {
     #[error("the data for key is not available")]
     Only3DSupported(),
     #[error("the data for key is not available")]
-    MissingElements(),
+    MissingElements(String),
+    #[error("missing linear ring")]
+    MissingLinearRing(),
+    #[error("missing surface kind for `{0}`")]
+    MissingSurfaceKind(String),
+    #[error("XLinks are not supported yet")]
+    XLinksNotSupported(),
 }

@@ -19,4 +19,6 @@ pub enum Error {
 
     #[error("Lower corner must be below upper corner: `{0}`")]
     LowerCornerMustBeEqualOrBelowUpperCorner(&'static str),
+    #[error("Earcut triangulation error: `{0}`")]
+    TriangulationError(&'static str),
 }

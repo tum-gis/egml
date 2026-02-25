@@ -16,4 +16,4 @@ rayon = { workspace = true }
 approx = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 sha2 = { workspace = true }
-earcut = "0.4.4"
+earcut = { workspace = true }

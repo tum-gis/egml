@@ -4,7 +4,7 @@ use std::fmt;
 use std::fmt::Write;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct Id(String);
 
 impl Id {
@@ -97,5 +97,30 @@ impl TryFrom<String> for Id {
 impl fmt::Display for Id {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Error::MustNotBeEmpty;
+
+    #[test]
+    fn id_from_empty_string() {
+        let result = Id::try_from("".to_string());
+
+        assert_eq!(result, Err(MustNotBeEmpty("id")));
+    }
+
+    #[test]
+    fn test() {
+        let xml_document = "<gml:Point>
+              <gml:pos srsDimension=\"3\">678000.9484065345 5403659.060043676 417.3802376791456</gml:pos>
+            </gml:Point>";
+
+        let id_a = Id::from_hashed_string(xml_document);
+        let id_b = Id::from_hashed_string(xml_document);
+
+        assert_eq!(id_a, id_b);
     }
 }

@@ -1,6 +1,5 @@
 mod error;
 pub mod model;
-pub mod operations;
 mod ops;
 pub mod util;
 

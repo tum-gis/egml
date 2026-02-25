@@ -1,14 +1,10 @@
-mod aggregates;
+mod abstract_geometry;
+pub mod aggregates;
+pub mod complexes;
 mod direct_position;
 mod envelope;
-mod primitives;
+pub mod primitives;
 
-pub use self::aggregates::multi_surface::*;
+pub use self::abstract_geometry::*;
 pub use self::direct_position::*;
 pub use self::envelope::*;
-pub use self::primitives::linear_ring::*;
-pub use self::primitives::polygon::*;
-pub use self::primitives::solid::*;
-pub use self::primitives::surface::*;
-pub use self::primitives::triangle::*;
-pub use self::primitives::triangulated_surface::*;

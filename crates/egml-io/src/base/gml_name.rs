@@ -1,33 +1,47 @@
 use crate::Error;
 use egml_core::model::base::{AbstractGml, Id};
-use quick_xml::Reader;
-use quick_xml::events::Event;
+use quick_xml::de;
+use serde::{Deserialize, Serialize};
+use std::io::BufRead;
 
-pub fn parse_abstract_gml(source_text: &str, id: Id) -> Result<AbstractGml, Error> {
-    let mut reader = Reader::from_str(source_text);
-    reader.config_mut().trim_text(true);
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[serde(transparent)]
+pub struct GmlAbstractGml {
+    #[serde(rename = "$value")]
+    content: Vec<GmlAbstractGmlContent>,
+}
 
-    let mut names = Vec::new();
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+pub enum GmlAbstractGmlContent {
+    #[serde(rename = "name")]
+    Name(GmlName),
 
-    let mut buf = Vec::new();
+    #[serde(other)]
+    Unknown,
+}
 
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) => match e.name().as_ref() {
-                b"gml:name" => {
-                    names.push(reader.read_text(e.name())?.to_string());
-                }
-                _ => {
-                    reader.read_to_end(e.name())?;
-                }
-            },
-            Ok(Event::Eof) => break,
-            Err(e) => return Err(Error::from(e)),
-            _ => (),
-        }
-    }
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+pub struct GmlName {
+    #[serde(rename = "$value", default)]
+    value: String,
+}
 
-    Ok(AbstractGml { id, name: names })
+pub fn parse_abstract_gml<R: BufRead>(reader: R, id: Id) -> Result<AbstractGml, Error> {
+    let parsed_abstract_gml: GmlAbstractGml = de::from_reader(reader)?;
+
+    let names: Vec<String> = parsed_abstract_gml
+        .content
+        .into_iter()
+        .filter_map(|content| match content {
+            GmlAbstractGmlContent::Name(name) => Some(name.value),
+            _ => None,
+        })
+        .collect();
+
+    Ok(AbstractGml {
+        id: Some(id),
+        name: names,
+    })
 }
 
 #[cfg(test)]
@@ -38,16 +52,16 @@ mod tests {
     #[test]
     fn parsing_abstract_gml_with_two_names() {
         let id = Id::from_hashed_string("test_id");
-        let source_text = "<gml:name>my_name_1</gml:name><gml:name>my_name_2</gml:name>";
+        let xml_document = b"<gml:name>my_name_1</gml:name><gml:name>my_name_2</gml:name>";
 
-        let abstract_gml = parse_abstract_gml(source_text, id).expect("");
+        let abstract_gml = parse_abstract_gml(xml_document.as_ref(), id).expect("");
         assert_eq!(abstract_gml.name, vec!["my_name_1", "my_name_2"]);
     }
 
     #[test]
     fn parsing_abstract_gml_with_other_elements() {
         let id = Id::from_hashed_string("test_id");
-        let source_text = "
+        let xml_document = b"
       <gml:name>0507</gml:name>
       <gml:boundedBy>
         <gml:Envelope srsName=\"urn:ogc:def:crs:EPSG::25832\" srsDimension=\"3\">
@@ -56,20 +70,29 @@ mod tests {
         </gml:Envelope>
       </gml:boundedBy>";
 
-        let abstract_gml = parse_abstract_gml(source_text, id).expect("");
+        let abstract_gml = parse_abstract_gml(xml_document.as_ref(), id).expect("");
         assert_eq!(abstract_gml.name, vec!["0507"]);
     }
 
     #[test]
     fn parsing_nested_abstract_gml() {
         let id = Id::from_hashed_string("test_id");
-        let source_text = "
+        let xml_document = b"
       <gml:name>0507</gml:name>
       <con:Window>
         <gml:name>window 23</gml:name>
       </con:Window>";
 
-        let abstract_gml = parse_abstract_gml(source_text, id).expect("");
+        let abstract_gml = parse_abstract_gml(xml_document.as_ref(), id).expect("");
+        assert_eq!(abstract_gml.name.len(), 1);
+    }
+
+    #[test]
+    fn parsing_abstract_gml_with_empty_name() {
+        let id = Id::from_hashed_string("test_id");
+        let xml_document = b"<gml:name/>";
+
+        let abstract_gml = parse_abstract_gml(xml_document.as_ref(), id).expect("");
         assert_eq!(abstract_gml.name.len(), 1);
     }
 }
