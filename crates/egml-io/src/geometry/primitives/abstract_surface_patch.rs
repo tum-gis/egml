@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum GmlSurfacePatchKind {
     // LinearRingProperty(GmlLinearRingProperty),
+    #[serde(rename(serialize = "gml:PolygonPatch", deserialize = "PolygonPatch"))]
     PolygonPatch(GmlPolygonPatch),
+    #[serde(rename(serialize = "gml:Triangle", deserialize = "Triangle"))]
     Triangle(GmlTriangle),
 }
 
@@ -23,16 +25,25 @@ impl TryFrom<GmlSurfacePatchKind> for SurfacePatchKind {
     }
 }
 
+impl From<&SurfacePatchKind> for GmlSurfacePatchKind {
+    fn from(patch: &SurfacePatchKind) -> Self {
+        match patch {
+            SurfacePatchKind::Triangle(t) => GmlSurfacePatchKind::Triangle(GmlTriangle::from(t)),
+            SurfacePatchKind::PolygonPatch(p) => {
+                GmlSurfacePatchKind::PolygonPatch(GmlPolygonPatch::from(p))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::aggregates::parse_multi_surface;
     use crate::primitives::GmlSurfacePatchKind;
-    use crate::primitives::{GmlPolygonPatch, GmlSurfacePatchArrayProperty};
-    use egml_core::model::geometry::primitives::{SurfacePatchArrayProperty, SurfacePatchKind};
+    use egml_core::model::geometry::primitives::SurfacePatchKind;
     use quick_xml::{DeError, de};
 
     #[test]
-    fn parsing_multi_surface_with_patches() {
+    fn deserialize_surface_patch_kind_as_polygon_patch() {
         let xml_document = b"
             <gml:PolygonPatch>
                 <gml:exterior>

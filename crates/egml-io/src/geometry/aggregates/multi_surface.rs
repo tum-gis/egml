@@ -1,17 +1,24 @@
 use crate::error::Error;
-use crate::primitives::GmlSurfaceProperty;
+use crate::primitives::{GmlSurfaceKind, GmlSurfaceProperty};
+use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
 use egml_core::model::geometry::aggregates::{AbstractGeometricAggregate, MultiSurface};
 use egml_core::model::geometry::primitives::SurfaceKind;
-use quick_xml::{DeError, de};
+use quick_xml::{DeError, de, se};
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct GmlMultiSurface {
-    #[serde(rename = "@id")]
+    #[serde(
+        rename(serialize = "@gml:id", deserialize = "@id"),
+        skip_serializing_if = "Option::is_none"
+    )]
     id: Option<String>,
 
-    #[serde(rename = "surfaceMember", default)]
+    #[serde(
+        rename(serialize = "gml:surfaceMember", deserialize = "surfaceMember"),
+        default
+    )]
     members: Vec<GmlSurfaceProperty>,
 }
 
@@ -19,9 +26,9 @@ impl TryFrom<GmlMultiSurface> for MultiSurface {
     type Error = Error;
 
     fn try_from(item: GmlMultiSurface) -> Result<Self, Self::Error> {
-        /*let id = value.id.map(|id| id.try_into()).transpose()?;
-        let abstract_gml = AbstractGml::with_optional_id(id);
-        let abstract_geometry = AbstractGeometry::new(abstract_gml);*/
+        let mut abstract_aggregate = AbstractGeometricAggregate::default();
+        let id = item.id.map(|id| id.try_into()).transpose()?;
+        abstract_aggregate.set_id(id);
 
         let surface_members: Vec<SurfaceKind> = item
             .members
@@ -30,23 +37,75 @@ impl TryFrom<GmlMultiSurface> for MultiSurface {
             .map(|x| x.try_into())
             .collect::<Result<Vec<SurfaceKind>, Error>>()?;
 
-        let multi_surface =
-            MultiSurface::new(AbstractGeometricAggregate::default(), surface_members)?;
+        let multi_surface = MultiSurface::new(abstract_aggregate, surface_members)?;
         Ok(multi_surface)
     }
 }
 
-pub fn parse_multi_surface<R: BufRead>(reader: R) -> Result<MultiSurface, Error> {
+impl From<&MultiSurface> for GmlMultiSurface {
+    fn from(multi_surface: &MultiSurface) -> Self {
+        Self {
+            id: multi_surface.id().map(|id| id.to_string()),
+            members: multi_surface
+                .surface_member()
+                .iter()
+                .map(|kind| GmlSurfaceProperty {
+                    href: None,
+                    content: Some(GmlSurfaceKind::from(kind)),
+                })
+                .collect(),
+        }
+    }
+}
+
+pub fn deserialize_multi_surface<R: BufRead>(reader: R) -> Result<MultiSurface, Error> {
     let parsed_geometry: Result<GmlMultiSurface, DeError> = de::from_reader(reader);
     parsed_geometry?.try_into()
 }
 
+/// Serializes a [`MultiSurface`] to a GML XML string.
+///
+/// # Errors
+///
+/// Returns [`Error::XmlSe`] if serialization fails.
+pub fn serialize_multi_surface(multi_surface: &MultiSurface) -> Result<String, Error> {
+    let gml = GmlMultiSurface::from(multi_surface);
+    Ok(se::to_string_with_root("gml:MultiSurface", &gml)?)
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::aggregates::parse_multi_surface;
+    use super::GmlMultiSurface;
+    use crate::aggregates::multi_surface::{deserialize_multi_surface, serialize_multi_surface};
+    use egml_core::model::geometry::DirectPosition;
+    use egml_core::model::geometry::aggregates::{AbstractGeometricAggregate, MultiSurface};
+    use egml_core::model::geometry::primitives::{
+        AbstractRing, AbstractSurface, LinearRing, Polygon, RingPropertyKind, SurfaceKind,
+    };
+    use quick_xml::de;
+
+    fn make_multi_surface() -> MultiSurface {
+        let points = vec![
+            DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
+        ];
+        let ring = LinearRing::new(AbstractRing::default(), points).unwrap();
+        let polygon = Polygon::new(
+            AbstractSurface::default(),
+            Some(RingPropertyKind::LinearRing(ring)),
+            vec![],
+        )
+        .unwrap();
+        MultiSurface::new(
+            AbstractGeometricAggregate::default(),
+            vec![SurfaceKind::Polygon(polygon)],
+        )
+        .unwrap()
+    }
 
     #[test]
-    fn parsing_multi_surface_with_composite_surface_member() {
+    fn deserialize_multi_surface_with_composite_surface_member() {
         let xml_document = b"
 				<gml:MultiSurface srsDimension=\"3\">
 					<gml:surfaceMember>
@@ -80,14 +139,13 @@ mod tests {
 							</gml:surfaceMember>
 						</gml:CompositeSurface>
 					</gml:surfaceMember>
-				</gml:MultiSurface>
-			";
+				</gml:MultiSurface>";
 
-        let _result = parse_multi_surface(xml_document.as_ref()).unwrap();
+        let _result = deserialize_multi_surface(xml_document.as_ref()).unwrap();
     }
 
     #[test]
-    fn parsing_multi_surface() {
+    fn deserialize_multi_surface_with_one_polygon_member() {
         let xml_document = b"<gml:MultiSurface gml:id=\"UUID_6b33ecfa-6e08-4e8e-a4b5-e1d06540faf0\">
               <gml:surfaceMember>
                 <gml:Polygon gml:id=\"UUID_efb8f6a5-82fa-4b21-8709-c1d93ed1e595\">
@@ -100,11 +158,11 @@ mod tests {
               </gml:surfaceMember>
             </gml:MultiSurface>";
 
-        let _result = parse_multi_surface(xml_document.as_ref()).unwrap();
+        let _result = deserialize_multi_surface(xml_document.as_ref()).unwrap();
     }
 
     #[test]
-    fn parsing_multi_surface_with_duplicate_elements() {
+    fn deserialize_multi_surface_with_duplicate_ring_points() {
         let xml_document = b"<gml:MultiSurface srsName=\"EPSG:25832\" srsDimension=\"3\">
               <gml:surfaceMember>
                 <gml:Polygon gml:id=\"4018133_PG.3nRTCd4XPu47PsAAUyNv\">
@@ -117,11 +175,11 @@ mod tests {
               </gml:surfaceMember>
             </gml:MultiSurface>";
 
-        let _result = parse_multi_surface(xml_document.as_ref()).unwrap();
+        let _result = deserialize_multi_surface(xml_document.as_ref()).unwrap();
     }
 
     #[test]
-    fn parsing_multi_surface_with_holes() {
+    fn deserialize_multi_surface_with_interior_rings() {
         let xml_document = b"
             <gml:MultiSurface srsName=\"EPSG:25832\" srsDimension=\"3\">
               <gml:surfaceMember>
@@ -215,13 +273,12 @@ mod tests {
               </gml:surfaceMember>
             </gml:MultiSurface>";
 
-        let result = parse_multi_surface(xml_document.as_ref()).unwrap();
-
+        let result = deserialize_multi_surface(xml_document.as_ref()).unwrap();
         assert_eq!(result.surface_member().len(), 1);
     }
 
     #[test]
-    fn parsing_multi_surface_without_id() {
+    fn deserialize_multi_surface_without_id() {
         let xml_document = b"<gml:MultiSurface>
               <gml:surfaceMember>
                 <gml:Polygon>
@@ -234,13 +291,12 @@ mod tests {
               </gml:surfaceMember>
             </gml:MultiSurface>";
 
-        let result = parse_multi_surface(xml_document.as_ref()).unwrap();
-
+        let result = deserialize_multi_surface(xml_document.as_ref()).unwrap();
         assert_eq!(result.surface_member().len(), 1);
     }
 
     #[test]
-    fn parsing_multi_surface_with_patches() {
+    fn deserialize_multi_surface_with_polygon_patches() {
         let xml_document = b"<gml:MultiSurface srsDimension=\"3\">
     <gml:surfaceMember>
         <gml:Surface>
@@ -270,8 +326,45 @@ mod tests {
     </gml:surfaceMember>
 </gml:MultiSurface>";
 
-        let result = parse_multi_surface(xml_document.as_ref()).unwrap();
-
+        let result = deserialize_multi_surface(xml_document.as_ref()).unwrap();
         assert_eq!(result.surface_member().len(), 2);
+    }
+
+    #[test]
+    fn serialize_multi_surface_writes_gml_tags() {
+        let multi_surface = make_multi_surface();
+        let xml = serialize_multi_surface(&multi_surface).unwrap();
+
+        assert!(xml.contains("<gml:MultiSurface"));
+        assert!(xml.contains("<gml:surfaceMember"));
+        assert!(xml.contains("<gml:Polygon"));
+        assert!(xml.contains("<gml:exterior"));
+        assert!(xml.contains("<gml:LinearRing"));
+        assert!(!xml.contains("id="));
+    }
+
+    #[test]
+    fn round_trip_multi_surface_preserves_member_count() {
+        let multi_surface = make_multi_surface();
+        let xml = serialize_multi_surface(&multi_surface).unwrap();
+        let recovered = deserialize_multi_surface(xml.as_bytes()).unwrap();
+
+        assert_eq!(
+            recovered.surface_member().len(),
+            multi_surface.surface_member().len()
+        );
+    }
+
+    #[test]
+    fn round_trip_multi_surface_from_xml() {
+        let input_xml = "<gml:MultiSurface gml:id=\"test-id\">\
+            <gml:surfaceMember><gml:Polygon><gml:exterior><gml:LinearRing><gml:posList srsDimension=\"3\">0 0 0 1 0 0 0 1 0 0 0 0</gml:posList></gml:LinearRing></gml:exterior></gml:Polygon></gml:surfaceMember>\
+            </gml:MultiSurface>";
+
+        let gml: GmlMultiSurface = de::from_reader(input_xml.as_bytes()).unwrap();
+        let multi_surface: MultiSurface = gml.try_into().unwrap();
+        let output_xml = serialize_multi_surface(&multi_surface).unwrap();
+
+        assert_eq!(input_xml, output_xml);
     }
 }

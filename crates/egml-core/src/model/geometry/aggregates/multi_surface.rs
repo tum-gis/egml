@@ -8,6 +8,9 @@ use crate::model::geometry::{DirectPosition, Envelope};
 use nalgebra::Isometry3;
 use rayon::prelude::*;
 
+/// An unordered collection of [`SurfaceKind`] members.
+///
+/// Corresponds to `gml:MultiSurface` in ISO 19136 §10.6.4.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MultiSurface {
     pub(crate) abstract_geometric_aggregate: AbstractGeometricAggregate,
@@ -15,12 +18,17 @@ pub struct MultiSurface {
 }
 
 impl MultiSurface {
+    /// Creates a new `MultiSurface` from a list of surface members.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyCollection`] if `members` is empty.
     pub fn new(
         abstract_geometric_aggregate: AbstractGeometricAggregate,
         members: Vec<SurfaceKind>,
     ) -> Result<Self, Error> {
         if members.is_empty() {
-            return Err(Error::MustNotBeEmpty("multi surface"));
+            return Err(Error::EmptyCollection("multi surface"));
         }
 
         Ok(Self {
@@ -29,18 +37,29 @@ impl MultiSurface {
         })
     }
 
-    pub fn surface_member(&self) -> &Vec<SurfaceKind> {
-        self.surface_member.as_ref()
+    /// Returns the surface members as a slice.
+    pub fn surface_member(&self) -> &[SurfaceKind] {
+        &self.surface_member
     }
 
+    /// Replaces the surface members.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyCollection`] if `val` is empty.
     pub fn set_surface_member(&mut self, val: Vec<SurfaceKind>) -> Result<(), Error> {
         if val.is_empty() {
-            return Err(Error::MustNotBeEmpty("multi surface"));
+            return Err(Error::EmptyCollection("multi surface"));
         }
         self.surface_member = val;
         Ok(())
     }
 
+    /// Triangulates all surface members and merges them into a single [`TriangulatedSurface`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TriangulationFailed`] if any member cannot be triangulated.
     pub fn triangulate(&self) -> Result<TriangulatedSurface, Error> {
         let triangulated_surfaces: Vec<TriangulatedSurface> = self
             .surface_member
@@ -66,14 +85,15 @@ impl MultiSurface {
         });
     }
 
+    /// Returns the union of the bounding boxes of all surface members.
     pub fn compute_envelope(&self) -> Envelope {
         let envelopes: Vec<Envelope> = self
             .surface_member
             .iter()
             .map(|x| x.compute_envelope())
-            .collect::<Vec<_>>();
+            .collect();
 
-        Envelope::from_envelopes(&envelopes.iter().collect::<Vec<_>>())
+        Envelope::from_envelopes(&envelopes)
             .expect("MultiSurface must have at least one surface member")
     }
 }

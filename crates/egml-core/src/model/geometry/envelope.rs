@@ -1,9 +1,16 @@
 use crate::error::Error;
-use crate::error::Error::LowerCornerMustBeEqualOrBelowUpperCorner;
+use crate::error::Error::InvalidEnvelopeBounds;
 use crate::model::geometry::DirectPosition;
 use nalgebra::{Point3, Vector3};
 use std::fmt;
 
+/// Axis-aligned bounding box in 3-D space.
+///
+/// An `Envelope` is defined by a lower corner and an upper corner such that
+/// each coordinate component of the lower corner is ≤ the corresponding
+/// component of the upper corner.
+///
+/// Corresponds to `gml:EnvelopeType` in ISO 19136.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Envelope {
     lower_corner: DirectPosition,
@@ -14,11 +21,33 @@ pub struct Envelope {
 }
 
 impl Envelope {
+    /// Creates an envelope from explicit lower and upper corners.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidEnvelopeBounds`] if any coordinate
+    /// component of `lower_corner` is strictly greater than the corresponding
+    /// component of `upper_corner`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use egml_core::model::geometry::{DirectPosition, Envelope};
+    ///
+    /// let lo = DirectPosition::new(0.0, 0.0, 0.0).unwrap();
+    /// let hi = DirectPosition::new(1.0, 2.0, 3.0).unwrap();
+    /// let env = Envelope::new(lo, hi).unwrap();
+    /// assert_eq!(env.size_x(), 1.0);
+    /// ```
     pub fn new(lower_corner: DirectPosition, upper_corner: DirectPosition) -> Result<Self, Error> {
-        let lower_corner_point: Point3<f64> = lower_corner.into();
-        let upper_corner_point: Point3<f64> = upper_corner.into();
-        if lower_corner_point > upper_corner_point {
-            return Err(LowerCornerMustBeEqualOrBelowUpperCorner(""));
+        if lower_corner.x() > upper_corner.x() {
+            return Err(InvalidEnvelopeBounds("x"));
+        }
+        if lower_corner.y() > upper_corner.y() {
+            return Err(InvalidEnvelopeBounds("y"));
+        }
+        if lower_corner.z() > upper_corner.z() {
+            return Err(InvalidEnvelopeBounds("z"));
         }
 
         Ok(Self {
@@ -57,36 +86,46 @@ impl Envelope {
         }
     }
 
+    /// Returns the lower (minimum) corner.
     pub fn lower_corner(&self) -> &DirectPosition {
         &self.lower_corner
     }
 
+    /// Returns the upper (maximum) corner.
     pub fn upper_corner(&self) -> &DirectPosition {
         &self.upper_corner
     }
 
+    /// Returns the diagonal vector from the lower corner to the upper corner.
     pub fn size(&self) -> Vector3<f64> {
         let lower_corner_point: Point3<f64> = self.lower_corner.into();
         let upper_corner_point: Point3<f64> = self.upper_corner.into();
         upper_corner_point - lower_corner_point
     }
 
+    /// Returns the extent along the X axis (`upper.x - lower.x`).
     pub fn size_x(&self) -> f64 {
         self.upper_corner.x() - self.lower_corner.x()
     }
 
+    /// Returns the extent along the Y axis (`upper.y - lower.y`).
     pub fn size_y(&self) -> f64 {
         self.upper_corner.y() - self.lower_corner.y()
     }
 
+    /// Returns the extent along the Z axis (`upper.z - lower.z`).
     pub fn size_z(&self) -> f64 {
         self.upper_corner.z() - self.lower_corner.z()
     }
 
+    /// Returns the volume of the box (`size_x * size_y * size_z`).
+    ///
+    /// Returns `0.0` for degenerate envelopes where one or more extents are zero.
     pub fn volume(&self) -> f64 {
         self.size_x() * self.size_y() * self.size_z()
     }
 
+    /// Returns `true` if `point` lies inside or on the boundary of this envelope.
     pub fn contains(&self, point: &DirectPosition) -> bool {
         let lower_corner: Point3<f64> = self.lower_corner.into();
         let upper_corner: Point3<f64> = self.upper_corner.into();
@@ -95,16 +134,25 @@ impl Envelope {
         lower_corner <= point && point <= upper_corner
     }
 
-    /// Returns `true` if the envelope is fully contained.
+    /// Returns `true` if `envelope` is fully contained within (or touches the boundary of) `self`.
     pub fn contains_envelope(&self, envelope: &Envelope) -> bool {
         self.contains(&envelope.lower_corner) && self.contains(&envelope.upper_corner)
     }
 
-    /// Returns `true` if the envelope is fully contained.
+    /// Returns `true` if any corner of `envelope` lies inside or on the boundary of `self`.
     pub fn contains_envelope_partially(&self, envelope: &Envelope) -> bool {
         self.contains(&envelope.lower_corner) || self.contains(&envelope.upper_corner)
     }
 
+    /// Returns a new envelope expanded by `distance` in every direction.
+    ///
+    /// Each lower-corner coordinate is decreased by `distance` and each
+    /// upper-corner coordinate is increased by `distance`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NonFiniteCoordinate`] if `distance` is NaN or infinite,
+    /// or if the resulting coordinates would overflow `f64::MAX`.
     pub fn enlarge(&self, distance: f64) -> Result<Envelope, Error> {
         let lower_corner = DirectPosition::new(
             self.lower_corner.x() - distance,
@@ -117,13 +165,16 @@ impl Envelope {
             self.upper_corner.z() + distance,
         )?;
 
-        let envelope = Envelope::new(lower_corner, upper_corner)?;
-        Ok(envelope)
+        Envelope::new(lower_corner, upper_corner)
     }
 }
 
 impl Envelope {
-    pub fn from_envelopes(envelopes: &[&Self]) -> Option<Self> {
+    /// Computes the union of a slice of envelopes.
+    ///
+    /// Returns `None` if `envelopes` is empty; otherwise returns the smallest
+    /// envelope that contains all envelopes in the slice.
+    pub fn from_envelopes(envelopes: &[Self]) -> Option<Self> {
         let first = envelopes.first()?;
 
         let (lower, upper) = envelopes.iter().skip(1).fold(
@@ -148,11 +199,14 @@ impl Envelope {
         Some(Envelope::new_unchecked(lower, upper))
     }
 
+    /// Computes the smallest envelope that contains all `points`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyCollection`] if `points` is empty.
     pub fn from_points(points: &[DirectPosition]) -> Result<Self, Error> {
         if points.is_empty() {
-            return Err(Error::MustNotBeEmpty(
-                "Cannot create envelope from empty points",
-            ));
+            return Err(Error::EmptyCollection("points"));
         }
 
         let first = &points[0];
@@ -211,7 +265,7 @@ mod tests {
     #[test]
     fn from_envelopes_single_returns_same_envelope() {
         let e = env(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
-        let result = Envelope::from_envelopes(&[&e]).unwrap();
+        let result = Envelope::from_envelopes(&[e.clone()]).unwrap();
 
         assert_eq!(result, e);
     }
@@ -220,7 +274,7 @@ mod tests {
     fn from_envelopes_two_disjoint() {
         let a = env(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
         let b = env(5.0, 6.0, 7.0, 8.0, 9.0, 10.0);
-        let result = Envelope::from_envelopes(&[&a, &b]).unwrap();
+        let result = Envelope::from_envelopes(&[a, b]).unwrap();
 
         assert_eq!(result, env(0.0, 0.0, 0.0, 8.0, 9.0, 10.0));
     }
@@ -229,7 +283,7 @@ mod tests {
     fn from_envelopes_overlapping() {
         let a = env(0.0, 0.0, 0.0, 5.0, 5.0, 5.0);
         let b = env(3.0, 3.0, 3.0, 7.0, 7.0, 7.0);
-        let result = Envelope::from_envelopes(&[&a, &b]).unwrap();
+        let result = Envelope::from_envelopes(&[a, b]).unwrap();
 
         assert_eq!(result, env(0.0, 0.0, 0.0, 7.0, 7.0, 7.0));
     }
@@ -238,7 +292,7 @@ mod tests {
     fn from_envelopes_one_contains_the_other() {
         let outer = env(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
         let inner = env(2.0, 3.0, 4.0, 5.0, 6.0, 7.0);
-        let result = Envelope::from_envelopes(&[&outer, &inner]).unwrap();
+        let result = Envelope::from_envelopes(&[outer.clone(), inner]).unwrap();
 
         assert_eq!(result, outer);
     }
@@ -248,7 +302,7 @@ mod tests {
         let a = env(0.0, 10.0, 20.0, 1.0, 11.0, 21.0);
         let b = env(-5.0, 8.0, 25.0, 2.0, 12.0, 30.0);
         let c = env(1.0, 9.0, 18.0, 3.0, 15.0, 22.0);
-        let result = Envelope::from_envelopes(&[&a, &b, &c]).unwrap();
+        let result = Envelope::from_envelopes(&[a, b, c]).unwrap();
 
         assert_eq!(result, env(-5.0, 8.0, 18.0, 3.0, 15.0, 30.0));
     }
@@ -257,7 +311,7 @@ mod tests {
     fn from_envelopes_with_negative_coords() {
         let a = env(-10.0, -20.0, -30.0, -1.0, -2.0, -3.0);
         let b = env(-5.0, -25.0, -15.0, 0.0, -1.0, 0.0);
-        let result = Envelope::from_envelopes(&[&a, &b]).unwrap();
+        let result = Envelope::from_envelopes(&[a, b]).unwrap();
 
         assert_eq!(result, env(-10.0, -25.0, -30.0, 0.0, -1.0, 0.0));
     }
@@ -266,7 +320,7 @@ mod tests {
     fn from_envelopes_zero_volume_envelopes() {
         let a = env(1.0, 1.0, 1.0, 1.0, 1.0, 1.0); // point
         let b = env(3.0, 3.0, 3.0, 3.0, 3.0, 3.0); // point
-        let result = Envelope::from_envelopes(&[&a, &b]).unwrap();
+        let result = Envelope::from_envelopes(&[a, b]).unwrap();
 
         assert_eq!(result, env(1.0, 1.0, 1.0, 3.0, 3.0, 3.0));
     }

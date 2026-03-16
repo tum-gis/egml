@@ -8,6 +8,9 @@ use nalgebra::Isometry3;
 use rayon::iter::IntoParallelRefMutIterator;
 use rayon::iter::ParallelIterator;
 
+/// An unordered collection of [`CurveKind`] members.
+///
+/// Corresponds to `gml:MultiCurve` in ISO 19136 §10.6.3.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MultiCurve {
     pub(crate) abstract_geometric_aggregate: AbstractGeometricAggregate,
@@ -15,12 +18,17 @@ pub struct MultiCurve {
 }
 
 impl MultiCurve {
+    /// Creates a new `MultiCurve` from an ordered list of curve members.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyCollection`] if `members` is empty.
     pub fn new(
         abstract_geometric_aggregate: AbstractGeometricAggregate,
         members: Vec<CurveKind>,
     ) -> Result<Self, Error> {
         if members.is_empty() {
-            return Err(Error::MustNotBeEmpty("multi surface"));
+            return Err(Error::EmptyCollection("multi curve"));
         }
 
         Ok(Self {
@@ -29,13 +37,19 @@ impl MultiCurve {
         })
     }
 
-    pub fn curve_member(&self) -> &Vec<CurveKind> {
-        self.curve_member.as_ref()
+    /// Returns the curve members as a slice.
+    pub fn curve_member(&self) -> &[CurveKind] {
+        &self.curve_member
     }
 
+    /// Replaces the curve members.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyCollection`] if `val` is empty.
     pub fn set_curve_member(&mut self, val: Vec<CurveKind>) -> Result<(), Error> {
         if val.is_empty() {
-            return Err(Error::MustNotBeEmpty("multi curve"));
+            return Err(Error::EmptyCollection("multi curve"));
         }
         self.curve_member = val;
         Ok(())
@@ -47,15 +61,16 @@ impl MultiCurve {
         });
     }
 
+    /// Returns the union of the bounding boxes of all curve members.
     pub fn compute_envelope(&self) -> Envelope {
         let envelopes: Vec<Envelope> = self
             .curve_member
             .iter()
             .map(|x| x.compute_envelope())
-            .collect::<Vec<_>>();
+            .collect();
 
-        Envelope::from_envelopes(&envelopes.iter().collect::<Vec<_>>())
-            .expect("MultiSurface must have at least one surface member")
+        Envelope::from_envelopes(&envelopes)
+            .expect("MultiCurve must have at least one curve member")
     }
 }
 

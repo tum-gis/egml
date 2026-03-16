@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub enum GmlRingKind {
+    #[serde(rename(serialize = "gml:LinearRing", deserialize = "LinearRing"))]
     LinearRing(GmlLinearRing),
     Ring(GmlRing),
 }
@@ -29,7 +30,7 @@ mod tests {
     use quick_xml::{DeError, de};
 
     #[test]
-    fn parsing_linear_ring() {
+    fn deserialize_ring_kind_as_linear_ring() {
         let xml_document = b"<gml:LinearRing>
       <gml:pos>0.0 0.0 0.0</gml:pos>
       <gml:pos>1.0 1.0 0.0</gml:pos>
@@ -45,7 +46,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_ring() {
+    fn deserialize_ring_kind_as_ring() {
         let xml_document = b"<gml:Ring>
        <gml:curveMember>
           <gml:LineString>

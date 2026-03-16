@@ -2,6 +2,14 @@ use crate::error::Error;
 use nalgebra::{Isometry3, Point3};
 use std::fmt;
 
+/// A 3-D coordinate triple in a coordinate reference system (CRS).
+///
+/// Corresponds to `gml:DirectPositionType` in ISO 19136.  All three components
+/// must be finite; `NaN` and ±infinity are rejected at construction time.
+///
+/// # Invariant
+///
+/// `x`, `y`, and `z` are always finite `f64` values.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct DirectPosition {
     x: f64,
@@ -10,63 +18,106 @@ pub struct DirectPosition {
 }
 
 impl DirectPosition {
+    /// Creates a new position from Cartesian coordinates.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NonFiniteCoordinate`] if any coordinate is NaN or infinite.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use egml_core::model::geometry::DirectPosition;
+    ///
+    /// let pos = DirectPosition::new(1.0, 2.0, 3.0).unwrap();
+    /// assert_eq!(pos.x(), 1.0);
+    /// assert!(DirectPosition::new(f64::NAN, 0.0, 0.0).is_err());
+    /// ```
     pub fn new(x: f64, y: f64, z: f64) -> Result<Self, Error> {
-        if !x.is_finite() || !y.is_finite() || !z.is_finite() {
-            return Err(Error::ValueNotFinite(""));
+        if !x.is_finite() {
+            return Err(Error::NonFiniteCoordinate("x"));
+        }
+        if !y.is_finite() {
+            return Err(Error::NonFiniteCoordinate("y"));
+        }
+        if !z.is_finite() {
+            return Err(Error::NonFiniteCoordinate("z"));
         }
 
         Ok(Self { x, y, z })
     }
 
-    pub(crate) fn new_unchecked(x: f64, y: f64, z: f64) -> Self {
-        debug_assert!(x.is_finite() && y.is_finite() && z.is_finite());
-        Self { x, y, z }
-    }
-
+    /// Returns the X coordinate.
     pub fn x(&self) -> f64 {
         self.x
     }
 
+    /// Returns the Y coordinate.
     pub fn y(&self) -> f64 {
         self.y
     }
 
+    /// Returns the Z coordinate.
     pub fn z(&self) -> f64 {
         self.z
     }
 
+    /// Returns the coordinates as a `[x, y, z]` array.
     pub fn coords(&self) -> [f64; 3] {
         [self.x, self.y, self.z]
     }
 
+    /// Sets the X coordinate.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NonFiniteCoordinate`] with the name `"x"` if `val` is NaN or infinite.
     pub fn set_x(&mut self, val: f64) -> Result<(), Error> {
         if !val.is_finite() {
-            return Err(Error::ValueNotFinite("x"));
+            return Err(Error::NonFiniteCoordinate("x"));
         }
         self.x = val;
         Ok(())
     }
 
+    /// Sets the Y coordinate.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NonFiniteCoordinate`] with the name `"y"` if `val` is NaN or infinite.
     pub fn set_y(&mut self, val: f64) -> Result<(), Error> {
         if !val.is_finite() {
-            return Err(Error::ValueNotFinite("y"));
+            return Err(Error::NonFiniteCoordinate("y"));
         }
         self.y = val;
         Ok(())
     }
 
+    /// Sets the Z coordinate.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NonFiniteCoordinate`] with the name `"z"` if `val` is NaN or infinite.
     pub fn set_z(&mut self, val: f64) -> Result<(), Error> {
         if !val.is_finite() {
-            return Err(Error::ValueNotFinite("z"));
+            return Err(Error::NonFiniteCoordinate("z"));
         }
         self.z = val;
         Ok(())
     }
 
+    /// Returns a single-element list containing a reference to `self`.
+    ///
+    /// This method exists so that `DirectPosition` satisfies the same
+    /// point-iteration pattern used by multi-point geometry types.
     pub fn points(&self) -> Vec<&DirectPosition> {
-        Vec::from([self])
+        vec![self]
     }
 
+    /// Applies a rigid-body transform (rotation + translation) to this position in place.
+    ///
+    /// `m` is a [`nalgebra::Isometry3`] — a combination of a rotation and a translation
+    /// that preserves distances and angles.
     pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
         let p: Point3<f64> = m * Point3::new(self.x, self.y, self.z);
         self.x = p.x;
@@ -74,16 +125,19 @@ impl DirectPosition {
         self.z = p.z;
     }
 
+    /// The position with the smallest representable coordinates `(f64::MIN, f64::MIN, f64::MIN)`.
     pub const MIN: DirectPosition = DirectPosition {
         x: f64::MIN,
         y: f64::MIN,
         z: f64::MIN,
     };
+    /// The position with the largest representable coordinates `(f64::MAX, f64::MAX, f64::MAX)`.
     pub const MAX: DirectPosition = DirectPosition {
         x: f64::MAX,
         y: f64::MAX,
         z: f64::MAX,
     };
+    /// The origin `(0.0, 0.0, 0.0)`.
     pub const ORIGIN: DirectPosition = DirectPosition {
         x: 0.0,
         y: 0.0,
@@ -166,27 +220,6 @@ mod tests {
         let p2 = p;
         assert_eq!(p, p2);
     }
-
-    /*#[test]
-    fn position_order() {
-        let point_a = DirectPosition::new(-1.0, 0.0, -3.0).unwrap();
-        let point_b = DirectPosition::new(1.0, 2.0, 3.0).unwrap();
-        let point_c = DirectPosition::new(1.0, 2.0, 3.0).unwrap();
-        let point_d = DirectPosition::new(1.0, 2.0, -3.0).unwrap();
-
-        assert!(point_a < point_b);
-        assert!(point_b <= point_c);
-        assert!(point_a <= point_b);
-        assert!(point_c > point_d);
-    }*/
-
-    /*#[test]
-    fn position_order_tw() {
-        let point_a = DirectPosition::new(1.0, 2.0, 3.0).unwrap();
-        let point_b = DirectPosition::new(2.0, 0.0, 0.0).unwrap();
-
-        assert!(point_a > point_b);
-    }*/
 
     #[test]
     fn apply_basic_transform() {

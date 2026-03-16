@@ -23,16 +23,25 @@ impl TryFrom<GmlSurfacePatchArrayProperty> for SurfacePatchArrayProperty {
     }
 }
 
+impl From<&SurfacePatchArrayProperty> for GmlSurfacePatchArrayProperty {
+    fn from(property: &SurfacePatchArrayProperty) -> Self {
+        let patches = property
+            .patches()
+            .iter()
+            .map(GmlSurfacePatchKind::from)
+            .collect();
+        Self { patches }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::primitives::surface_patch_array_property::GmlSurfacePatchArrayProperty;
-    use egml_core::model::geometry::primitives::{
-        LinearRing, PolygonPatch, SurfacePatchArrayProperty,
-    };
+    use egml_core::model::geometry::primitives::SurfacePatchArrayProperty;
     use quick_xml::{DeError, de};
 
     #[test]
-    fn parsing_surface_patch_array_property() {
+    fn deserialize_surface_patch_array_property_with_polygon_patches() {
         let xml_document = b"<gml:patches>
                 <gml:PolygonPatch>
                     <gml:exterior>
@@ -60,7 +69,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_surface_patch_array_property_with_triangles() {
+    fn deserialize_surface_patch_array_property_with_triangles() {
         let xml_document = b"<gml:patches>
     <gml:Triangle>
         <gml:exterior>

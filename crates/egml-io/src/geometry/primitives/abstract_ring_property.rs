@@ -1,6 +1,7 @@
 use crate::Error;
 use crate::primitives::abstract_ring::GmlRingKind;
-use egml_core::model::geometry::primitives::RingPropertyKind;
+use crate::primitives::linear_ring::GmlLinearRing;
+use egml_core::model::geometry::primitives::{LinearRing, RingPropertyKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -20,15 +21,23 @@ impl TryFrom<GmlRingProperty> for RingPropertyKind {
     }
 }
 
+impl From<&LinearRing> for GmlRingProperty {
+    fn from(ring: &LinearRing) -> Self {
+        Self {
+            content: GmlRingKind::LinearRing(GmlLinearRing::from(ring)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::primitives::abstract_ring::GmlRingKind;
     use crate::primitives::abstract_ring_property::GmlRingProperty;
-    use egml_core::model::geometry::primitives::{LinearRing, RingKind};
+    use egml_core::model::geometry::primitives::RingKind;
     use quick_xml::{DeError, de};
 
     #[test]
-    fn parsing_linear_ring() {
+    fn deserialize_ring_property_as_linear_ring() {
         let xml_document = b"<gml:exterior>
    <gml:LinearRing>
       <gml:pos>0.0 0.0 0.0</gml:pos>
@@ -42,16 +51,13 @@ mod tests {
         let gml_ring_kind = result.unwrap().content;
         let ring_kind: RingKind = gml_ring_kind.try_into().unwrap();
 
-        let linear_ring = match ring_kind {
-            RingKind::LinearRing(x) => x,
-            _ => panic!("expected linear ring"),
-        };
+        let RingKind::LinearRing(linear_ring) = ring_kind;
 
         assert_eq!(linear_ring.points().len(), 3);
     }
 
     #[test]
-    fn parsing_ring() {
+    fn deserialize_ring_property_as_ring() {
         let xml_document = b"<gml:exterior>
    <gml:Ring>
        <gml:curveMember>

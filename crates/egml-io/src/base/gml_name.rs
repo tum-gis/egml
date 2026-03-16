@@ -26,7 +26,7 @@ pub struct GmlName {
     value: String,
 }
 
-pub fn parse_abstract_gml<R: BufRead>(reader: R, id: Id) -> Result<AbstractGml, Error> {
+pub fn deserialize_abstract_gml<R: BufRead>(reader: R, id: Id) -> Result<AbstractGml, Error> {
     let parsed_abstract_gml: GmlAbstractGml = de::from_reader(reader)?;
 
     let names: Vec<String> = parsed_abstract_gml
@@ -46,20 +46,20 @@ pub fn parse_abstract_gml<R: BufRead>(reader: R, id: Id) -> Result<AbstractGml, 
 
 #[cfg(test)]
 mod tests {
-    use crate::base::gml_name::parse_abstract_gml;
+    use crate::base::gml_name::deserialize_abstract_gml;
     use egml_core::model::base::Id;
 
     #[test]
-    fn parsing_abstract_gml_with_two_names() {
+    fn deserialize_abstract_gml_with_two_names() {
         let id = Id::from_hashed_string("test_id");
         let xml_document = b"<gml:name>my_name_1</gml:name><gml:name>my_name_2</gml:name>";
 
-        let abstract_gml = parse_abstract_gml(xml_document.as_ref(), id).expect("");
+        let abstract_gml = deserialize_abstract_gml(xml_document.as_ref(), id).expect("");
         assert_eq!(abstract_gml.name, vec!["my_name_1", "my_name_2"]);
     }
 
     #[test]
-    fn parsing_abstract_gml_with_other_elements() {
+    fn deserialize_abstract_gml_ignores_non_name_elements() {
         let id = Id::from_hashed_string("test_id");
         let xml_document = b"
       <gml:name>0507</gml:name>
@@ -70,12 +70,12 @@ mod tests {
         </gml:Envelope>
       </gml:boundedBy>";
 
-        let abstract_gml = parse_abstract_gml(xml_document.as_ref(), id).expect("");
+        let abstract_gml = deserialize_abstract_gml(xml_document.as_ref(), id).expect("");
         assert_eq!(abstract_gml.name, vec!["0507"]);
     }
 
     #[test]
-    fn parsing_nested_abstract_gml() {
+    fn deserialize_abstract_gml_ignores_nested_names() {
         let id = Id::from_hashed_string("test_id");
         let xml_document = b"
       <gml:name>0507</gml:name>
@@ -83,16 +83,16 @@ mod tests {
         <gml:name>window 23</gml:name>
       </con:Window>";
 
-        let abstract_gml = parse_abstract_gml(xml_document.as_ref(), id).expect("");
+        let abstract_gml = deserialize_abstract_gml(xml_document.as_ref(), id).expect("");
         assert_eq!(abstract_gml.name.len(), 1);
     }
 
     #[test]
-    fn parsing_abstract_gml_with_empty_name() {
+    fn deserialize_abstract_gml_with_empty_name() {
         let id = Id::from_hashed_string("test_id");
         let xml_document = b"<gml:name/>";
 
-        let abstract_gml = parse_abstract_gml(xml_document.as_ref(), id).expect("");
+        let abstract_gml = deserialize_abstract_gml(xml_document.as_ref(), id).expect("");
         assert_eq!(abstract_gml.name.len(), 1);
     }
 }

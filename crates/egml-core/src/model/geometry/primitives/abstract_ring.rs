@@ -4,6 +4,10 @@ use crate::model::geometry::primitives::{
 use crate::model::geometry::{DirectPosition, Envelope};
 use nalgebra::Isometry3;
 
+/// Base data shared by all GML ring geometry types (ISO 19136 §10.5.3).
+///
+/// A ring is a closed curve used as the boundary of a surface patch.
+/// The only concrete ring type currently implemented is [`LinearRing`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AbstractRing {
     pub(crate) abstract_curve: AbstractCurve,
@@ -15,11 +19,15 @@ impl AbstractRing {
     }
 }
 
+/// Object-safe read accessor for [`AbstractRing`] fields.
 pub trait AsAbstractRing: AsAbstractCurve {
+    /// Returns a reference to the embedded [`AbstractRing`] base data.
     fn abstract_ring(&self) -> &AbstractRing;
 }
 
+/// Mutable companion to [`AsAbstractRing`].
 pub trait AsAbstractRingMut: AsAbstractRing + AsAbstractCurveMut {
+    /// Returns a mutable reference to the embedded [`AbstractRing`] base data.
     fn abstract_ring_mut(&mut self) -> &mut AbstractRing;
 }
 
@@ -35,6 +43,7 @@ impl AsAbstractRingMut for AbstractRing {
     }
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_abstract_ring_traits {
     ($type:ty) => {
@@ -60,8 +69,10 @@ macro_rules! impl_abstract_ring_traits {
 
 impl_abstract_ring_traits!(AbstractRing);
 
+/// Discriminated union of all concrete ring implementations.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RingKind {
+    /// A [`LinearRing`] ring.
     LinearRing(LinearRing),
 }
 

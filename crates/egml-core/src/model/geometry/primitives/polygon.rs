@@ -79,7 +79,7 @@ impl Polygon {
     }
 
     pub fn plane_equation(&self) -> Plane {
-        Plane::new(self.outer_boundary_lower_corner(), self.normal()).unwrap()
+        Plane::new(self.outer_boundary_lower_corner(), self.normal())
     }
 
     pub fn triangulate(&self) -> Result<TriangulatedSurface, Error> {

@@ -24,7 +24,7 @@ mod tests {
     use quick_xml::de;
 
     #[test]
-    fn test_parse_measure() {
+    fn deserialize_measure() {
         let xml_document = b"
           <gen:value uom=\"m2\">120.0</gen:value>";
 

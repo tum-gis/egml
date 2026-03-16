@@ -6,7 +6,13 @@ use crate::model::geometry::primitives::{
     TriangulatedSurface,
 };
 use crate::util::triangulate::triangulate;
+use nalgebra::Isometry3;
 
+/// A planar polygon used as a surface patch inside a [`Surface`](crate::model::geometry::primitives::Surface).
+///
+/// `PolygonPatch` has the same geometry as [`Polygon`](crate::model::geometry::primitives::Polygon)
+/// but is used exclusively as a building block of a patched surface rather than
+/// as a standalone geometry element.  Corresponds to `gml:PolygonPatch` in ISO 19136 §10.5.8.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PolygonPatch {
     pub(crate) abstract_surface_patch: AbstractSurfacePatch,
@@ -56,7 +62,7 @@ impl PolygonPatch {
             .map(|x| x.compute_envelope())
             .collect::<Vec<_>>();
 
-        Envelope::from_envelopes(&envelopes.iter().collect::<Vec<_>>())
+        Envelope::from_envelopes(&envelopes)
             .expect("PolygonPatch must have at least one exterior ring or interior ring")
     }
 
@@ -69,6 +75,13 @@ impl PolygonPatch {
         };
 
         triangulate(Some(exterior), self.interior.clone())
+    }
+
+    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
+        if let Some(exterior) = &mut self.exterior {
+            exterior.apply_transform(m);
+        }
+        self.interior.iter_mut().for_each(|x| x.apply_transform(m));
     }
 }
 

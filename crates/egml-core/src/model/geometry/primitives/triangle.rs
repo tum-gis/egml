@@ -1,4 +1,4 @@
-use crate::Error::ContainsEqualElements;
+use crate::Error::IdenticalPositions;
 use crate::error::Error;
 use crate::model::geometry::primitives::{
     AbstractSurfacePatch, AsAbstractSurfacePatch, AsAbstractSurfacePatchMut, TriangulatedSurface,
@@ -22,14 +22,8 @@ pub struct Triangle {
 impl Triangle {
     pub fn new(a: DirectPosition, b: DirectPosition, c: DirectPosition) -> Result<Self, Error> {
         if a == b || a == c || b == c {
-            return Err(ContainsEqualElements);
+            return Err(IdenticalPositions);
         }
-        /*let a_b_dist: f64 = distance(&a, &b);
-        let b_c_dist: f64 = distance(&b, &c);
-        let c_a_dist: f64 = distance(&c, &a);
-        if a_b_dist <= f64::EPSILON || b_c_dist <= f64::EPSILON || c_a_dist <= f64::EPSILON {
-            return Err(ContainsEqualElements);
-        }*/
 
         Ok(Self {
             abstract_surface_patch: AbstractSurfacePatch::default(),
@@ -39,27 +33,19 @@ impl Triangle {
         })
     }
 
-    pub(crate) fn new_unchecked(
-        a: DirectPosition,
-        b: DirectPosition,
-        c: DirectPosition,
-    ) -> Result<Self, Error> {
-        Ok(Self {
+    pub(crate) fn new_unchecked(a: DirectPosition, b: DirectPosition, c: DirectPosition) -> Self {
+        Self {
             abstract_surface_patch: AbstractSurfacePatch::default(),
             a,
             b,
             c,
-        })
+        }
     }
 
     pub fn distance_to_local_point(&self, p: &DirectPosition) -> f64 {
         let parry_triangle: parry3d_f64::shape::Triangle = self.clone().into();
         let point: parry3d_f64::math::Vector = (*p).into();
         parry_triangle.distance_to_local_point(point, false)
-    }
-
-    fn outer_boundary_points(&self) -> Vec<&DirectPosition> {
-        vec![&self.a, &self.b, &self.c]
     }
 
     pub fn points(&self) -> Vec<&DirectPosition> {
@@ -73,17 +59,7 @@ impl Triangle {
     }
 
     pub fn compute_envelope(&self) -> Envelope {
-        let x_min = self.a.x().min(self.b.x()).min(self.c.x());
-        let x_max = self.a.x().max(self.b.x()).max(self.c.x());
-        let y_min = self.a.y().min(self.b.y()).min(self.c.y());
-        let y_max = self.a.y().max(self.b.y()).max(self.c.y());
-        let z_min = self.a.z().min(self.b.z()).min(self.c.z());
-        let z_max = self.a.z().max(self.b.z()).max(self.c.z());
-
-        let lower_corner = DirectPosition::new_unchecked(x_min, y_min, z_min);
-        let upper_corner = DirectPosition::new_unchecked(x_max, y_max, z_max);
-
-        Envelope::new_unchecked(lower_corner, upper_corner)
+        Envelope::from_points(&[self.a, self.b, self.c]).expect("triangle points are finite")
     }
 
     pub fn area(&self) -> f64 {
@@ -128,7 +104,7 @@ mod tests {
             DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
         );
 
-        assert!(matches!(triangle_result, Err(Error::ContainsEqualElements)));
+        assert!(matches!(triangle_result, Err(Error::IdenticalPositions)));
     }
 
     #[test]
@@ -157,6 +133,6 @@ mod tests {
                 .unwrap(),
         );
 
-        assert!(matches!(triangle_result, Err(Error::ContainsEqualElements)));
+        assert!(matches!(triangle_result, Err(Error::IdenticalPositions)));
     }
 }

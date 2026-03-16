@@ -5,10 +5,14 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct GmlPolygonPatch {
-    #[serde(rename = "exterior")]
+    #[serde(rename(serialize = "gml:exterior", deserialize = "exterior"))]
     pub exterior: Option<GmlRingProperty>,
 
-    #[serde(rename = "interior", default)]
+    #[serde(
+        rename(serialize = "gml:interior", deserialize = "interior"),
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub interior: Vec<GmlRingProperty>,
 }
 
@@ -29,16 +33,36 @@ impl TryFrom<GmlPolygonPatch> for PolygonPatch {
     }
 }
 
+impl From<&PolygonPatch> for GmlPolygonPatch {
+    fn from(patch: &PolygonPatch) -> Self {
+        let exterior = patch.exterior().map(ring_property_kind_to_gml);
+        let interior = patch
+            .interior()
+            .iter()
+            .map(ring_property_kind_to_gml)
+            .collect();
+        Self { exterior, interior }
+    }
+}
+
+fn ring_property_kind_to_gml(kind: &RingPropertyKind) -> GmlRingProperty {
+    match kind {
+        RingPropertyKind::LinearRing(lr) => GmlRingProperty::from(lr),
+        RingPropertyKind::RingKind(_) => todo!("Ring serialization is not yet implemented"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::primitives::{GmlPolygon, GmlPolygonPatch};
+    use crate::primitives::GmlPolygonPatch;
+    use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::{
-        LinearRing, Polygon, PolygonPatch, RingKind, RingPropertyKind,
+        AbstractRing, AbstractSurfacePatch, LinearRing, PolygonPatch, RingPropertyKind,
     };
-    use quick_xml::{DeError, de};
+    use quick_xml::{DeError, de, se};
 
     #[test]
-    fn parsing_polygon_patch() {
+    fn deserialize_polygon_patch() {
         let xml_document = b"<gml:PolygonPatch>
                     <gml:exterior>
                         <gml:LinearRing>
@@ -62,7 +86,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_polygon_patch_with_interior() {
+    fn deserialize_polygon_patch_with_interior_rings() {
         let xml_document = b"<gml:PolygonPatch>
                     <gml:exterior>
                         <gml:LinearRing>
@@ -95,5 +119,45 @@ mod tests {
             }
             _ => panic!("should be linear ring"),
         }
+    }
+
+    fn make_polygon_patch() -> PolygonPatch {
+        let points = vec![
+            DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
+        ];
+        let ring = LinearRing::new(AbstractRing::default(), points).unwrap();
+        PolygonPatch::new(
+            AbstractSurfacePatch::default(),
+            Some(RingPropertyKind::LinearRing(ring)),
+            vec![],
+        )
+    }
+
+    #[test]
+    fn serialize_polygon_patch_writes_gml_tags() {
+        let patch = make_polygon_patch();
+        let gml = GmlPolygonPatch::from(&patch);
+        let xml = se::to_string_with_root("gml:PolygonPatch", &gml).unwrap();
+
+        assert!(xml.contains("<gml:PolygonPatch"));
+        assert!(xml.contains("<gml:exterior"));
+        assert!(xml.contains("<gml:LinearRing"));
+        assert!(xml.contains("<gml:posList"));
+    }
+
+    #[test]
+    fn round_trip_polygon_patch_from_xml() {
+        let input_xml = "<gml:PolygonPatch>\
+            <gml:exterior><gml:LinearRing><gml:posList srsDimension=\"3\">0 0 0 1 0 0 0 1 0 0 0 0</gml:posList></gml:LinearRing></gml:exterior>\
+            </gml:PolygonPatch>";
+
+        let gml: GmlPolygonPatch = de::from_reader(input_xml.as_bytes()).unwrap();
+        let patch: PolygonPatch = gml.try_into().unwrap();
+        let output_xml =
+            se::to_string_with_root("gml:PolygonPatch", &GmlPolygonPatch::from(&patch)).unwrap();
+
+        assert_eq!(input_xml, output_xml);
     }
 }

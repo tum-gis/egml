@@ -25,7 +25,7 @@ mod tests {
     use quick_xml::de;
 
     #[test]
-    fn test_parse_code() {
+    fn deserialize_code() {
         let xml_document = b"
           <tran:function>2</tran:function>";
 
@@ -37,7 +37,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_code_with_code_space() {
+    fn deserialize_code_with_code_space() {
         let xml_document = b"
           <bldg:class codeSpace=\"http://www.sig3d.org/codelists/citygml/2.0/building/2.0/_AbstractBuilding_class.xml\">1000</bldg:class>";
 

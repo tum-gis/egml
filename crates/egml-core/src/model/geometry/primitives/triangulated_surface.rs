@@ -1,26 +1,34 @@
 use crate::error::Error;
-// use crate::impl_surface_traits;
 use crate::impl_surface_traits;
 use crate::model::geometry::Envelope;
 use crate::model::geometry::primitives::{
     AbstractSurface, AsSurface, AsSurfaceMut, Surface, SurfacePatchArrayProperty, SurfacePatchKind,
     Triangle,
 };
-use rayon::prelude::*;
-
+use nalgebra::Isometry3;
+/// A 2-D surface composed exclusively of [`Triangle`] patches.
+///
+/// Corresponds to `gml:TriangulatedSurface` in ISO 19136 §10.5.14.
+/// This type is the primary output of triangulation operations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TriangulatedSurface {
     pub(crate) surface: Surface,
 }
 
 impl TriangulatedSurface {
+    /// Creates a new `TriangulatedSurface` from an existing [`Surface`].
     pub fn new(surface: Surface) -> Result<Self, Error> {
         Ok(TriangulatedSurface { surface })
     }
 
+    /// Creates a `TriangulatedSurface` from a flat list of triangles.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyCollection`] if `triangles` is empty.
     pub fn from_triangles(triangles: Vec<Triangle>) -> Result<Self, Error> {
         if triangles.is_empty() {
-            return Err(Error::MustNotBeEmpty("triangulated surface"));
+            return Err(Error::EmptyCollection("triangulated surface"));
         }
 
         let patches: Vec<SurfacePatchKind> = triangles
@@ -36,15 +44,19 @@ impl TriangulatedSurface {
         ))
     }
 
+    /// Merges multiple triangulated surfaces into one by combining all their patches.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyCollection`] if `surfaces` is empty.
     pub fn from_triangulated_surfaces(surfaces: Vec<TriangulatedSurface>) -> Result<Self, Error> {
         if surfaces.is_empty() {
-            return Err(Error::MustNotBeEmpty("surfaces to combine"));
+            return Err(Error::EmptyCollection("surfaces to combine"));
         }
 
-        // TODO: without cloning
         let patches: Vec<SurfacePatchKind> = surfaces
             .into_iter()
-            .flat_map(|surface| surface.patches().patches().clone())
+            .flat_map(|surface| surface.surface.into_patches().patches)
             .collect();
 
         let surface_patch_array_property: SurfacePatchArrayProperty =
@@ -54,6 +66,7 @@ impl TriangulatedSurface {
         Ok(TriangulatedSurface { surface })
     }
 
+    /// Returns references to all [`Triangle`] patches in this surface.
     pub fn triangles(&self) -> Vec<&Triangle> {
         self.surface
             .patches()
@@ -66,30 +79,14 @@ impl TriangulatedSurface {
             .collect()
     }
 
+    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
+        self.surface.apply_transform(m);
+    }
+
+    /// Returns the axis-aligned bounding box of all triangles.
     pub fn compute_envelope(&self) -> Envelope {
         self.surface.compute_envelope()
     }
-
-    /*pub fn patches(&self) -> &Vec<Triangle> {
-        self.surface.patches()
-    }
-
-    pub fn append_patches(&mut self, mut patches: Vec<Triangle>) {
-        self.patches.append(&mut patches)
-    }*/
-
-    /*pub fn points(&self) -> Vec<&DirectPosition> {
-        self.patches.iter().fold(Vec::new(), |mut acc, x| {
-            acc.extend(x.points().iter());
-            acc
-        })
-    }
-
-    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
-        self.patches.par_iter_mut().for_each(|p| {
-            p.apply_transform(m);
-        });
-    }*/
 }
 
 impl AsSurface for TriangulatedSurface {

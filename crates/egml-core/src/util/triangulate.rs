@@ -4,6 +4,20 @@ use crate::model::geometry::primitives::{
     LinearRing, RingPropertyKind, Triangle, TriangulatedSurface,
 };
 
+/// Triangulates a polygon defined by an exterior ring and optional interior (hole) rings.
+///
+/// Uses the [earcut](https://docs.rs/earcut) algorithm after projecting the 3-D
+/// coordinates to 2-D via orthographic projection.
+///
+/// # Errors
+///
+/// Returns [`Error::TriangulationFailed`] if the earcut algorithm produces no triangles
+/// (e.g. degenerate or self-intersecting input).
+///
+/// # Panics
+///
+/// Currently panics (via `todo!`) if `exterior` is `None` or if non-`LinearRing`
+/// ring kinds are supplied.  These cases are not yet implemented.
 pub fn triangulate(
     exterior: Option<RingPropertyKind>,
     interior: Vec<RingPropertyKind>,
@@ -40,7 +54,7 @@ fn triangulate_without_holes(exterior: LinearRing) -> Result<TriangulatedSurface
             exterior.points()[0],
             exterior.points()[1],
             exterior.points()[2],
-        )?;
+        );
         return TriangulatedSurface::from_triangles(vec![triangle]);
     }
 
@@ -56,7 +70,7 @@ fn triangulate_without_holes(exterior: LinearRing) -> Result<TriangulatedSurface
     let mut earcut = earcut::Earcut::new();
     earcut.earcut(vertices_2d_buf.iter().copied(), &[], &mut triangle_indices);
     if triangle_indices.is_empty() {
-        return Err(Error::TriangulationError("earcut failed to triangulate"));
+        return Err(Error::TriangulationFailed("earcut failed to triangulate"));
     }
 
     let triangles: Vec<Triangle> = triangle_indices
@@ -77,8 +91,8 @@ fn triangulate_with_holes(
     exterior: LinearRing,
     interior: Vec<LinearRing>,
 ) -> Result<TriangulatedSurface, Error> {
-    let mut exterior_buf = Vec::new();
-    let mut all_direct_positions: Vec<DirectPosition> = exterior.points().clone();
+    let mut flat_2d_buf = Vec::new();
+    let mut all_direct_positions: Vec<DirectPosition> = exterior.points().to_vec();
     all_direct_positions.extend(interior.iter().flat_map(|x| x.points()));
 
     let linear_ring_lengths: Vec<usize> = {
@@ -99,12 +113,12 @@ fn triangulate_with_holes(
         .iter()
         .map(|p| p.coords())
         .collect::<Vec<_>>();
-    earcut::utils3d::project3d_to_2d(&vertices, vertices.len(), &mut exterior_buf);
+    earcut::utils3d::project3d_to_2d(&vertices, vertices.len(), &mut flat_2d_buf);
 
     let mut triangle_indices: Vec<usize> = vec![];
     let mut earcut = earcut::Earcut::new();
     earcut.earcut(
-        exterior_buf.iter().copied(),
+        flat_2d_buf.iter().copied(),
         &hole_indices,
         &mut triangle_indices,
     );

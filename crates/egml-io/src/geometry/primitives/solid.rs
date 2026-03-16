@@ -1,21 +1,25 @@
 use crate::error::Error;
 use crate::error::Error::MissingElements;
 use crate::primitives::shell_property::GmlShellProperty;
-use egml_core::model::base::AsAbstractGmlMut;
+use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
 use egml_core::model::geometry::primitives::{AbstractSolid, Solid, SurfaceProperty};
-use quick_xml::de;
+use quick_xml::{de, se};
 use serde::{Deserialize, Serialize};
-use std::hash::Hasher;
 use std::io::BufRead;
+use tracing::debug;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct GmlSolid {
-    #[serde(rename = "@id")]
+    #[serde(
+        rename(serialize = "@gml:id", deserialize = "@id"),
+        skip_serializing_if = "Option::is_none"
+    )]
     id: Option<String>,
 
-    // #[serde(rename = "$value")]
-    // members: Vec<SurfaceMemberElement>,
-    #[serde(rename = "$value")]
+    #[serde(
+        rename(serialize = "gml:exterior", deserialize = "exterior"),
+        skip_serializing_if = "Option::is_none"
+    )]
     exterior: Option<GmlShellProperty>,
 }
 
@@ -34,25 +38,73 @@ impl TryFrom<GmlSolid> for Solid {
             .ok_or(MissingElements("".to_string()))?
             .members
             .into_iter()
-            .map(|x| x.try_into())
-            .collect::<Result<Vec<_>, _>>()?;
+            .flat_map(|x| match x.try_into() {
+                Ok(surface_property) => Some(surface_property),
+                Err(e) => {
+                    debug!("surface property contains invalid geometry: {}", e);
+                    None
+                }
+            })
+            .collect();
 
         let solid = Solid::new(abstract_solid, surface_properties)?;
         Ok(solid)
     }
 }
 
-pub fn parse_solid<R: BufRead>(reader: R) -> Result<Solid, Error> {
+impl From<&Solid> for GmlSolid {
+    fn from(solid: &Solid) -> Self {
+        Self {
+            id: solid.id().map(|id| id.to_string()),
+            exterior: Some(GmlShellProperty::from(solid.members())),
+        }
+    }
+}
+
+pub fn deserialize_solid<R: BufRead>(reader: R) -> Result<Solid, Error> {
     let parsed_geometry: GmlSolid = de::from_reader(reader)?;
     parsed_geometry.try_into()
 }
 
+/// Serializes a [`Solid`] to a GML XML string.
+///
+/// # Errors
+///
+/// Returns [`Error::XmlSe`] if serialization fails.
+pub fn serialize_solid(solid: &Solid) -> Result<String, Error> {
+    let gml = GmlSolid::from(solid);
+    Ok(se::to_string_with_root("gml:Solid", &gml)?)
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::geometry::primitives::solid::parse_solid;
+    use super::GmlSolid;
+    use crate::primitives::solid::{deserialize_solid, serialize_solid};
+    use egml_core::model::geometry::DirectPosition;
+    use egml_core::model::geometry::primitives::{
+        AbstractRing, AbstractSurface, LinearRing, Polygon, RingPropertyKind, Solid, SurfaceKind,
+        SurfaceProperty,
+    };
+
+    fn make_solid() -> Solid {
+        let points = vec![
+            DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
+        ];
+        let ring = LinearRing::new(AbstractRing::default(), points).unwrap();
+        let polygon = Polygon::new(
+            AbstractSurface::default(),
+            Some(RingPropertyKind::LinearRing(ring)),
+            vec![],
+        )
+        .unwrap();
+        let surface_prop = SurfaceProperty::new(SurfaceKind::Polygon(polygon));
+        Solid::new(Default::default(), vec![surface_prop]).unwrap()
+    }
 
     #[test]
-    fn parsing_solid() {
+    fn deserialize_solid_with_two_polygon_surfaces() {
         let xml_document = b"\
         <gml:Solid gml:id=\"UUID_9c9c6a8e-4704-4675-b3c0-e8f8c9dc4522\">
           <gml:exterior>
@@ -79,13 +131,13 @@ mod tests {
           </gml:exterior>
         </gml:Solid>";
 
-        let solid_geometry = parse_solid(xml_document.as_ref()).unwrap();
+        let solid_geometry = deserialize_solid(xml_document.as_ref()).unwrap();
 
         assert_eq!(solid_geometry.members().len(), 2);
     }
 
     #[test]
-    fn parsing_solid_xlink_members() {
+    fn deserialize_solid_with_xlink_members_returns_error() {
         let xml_document = b"\
         <gml:Solid srsDimension=\"3\">
           <gml:exterior>
@@ -97,17 +149,13 @@ mod tests {
           </gml:exterior>
         </gml:Solid>";
 
-        let solid_geometry_result = parse_solid(xml_document.as_ref());
+        let solid_geometry_result = deserialize_solid(xml_document.as_ref());
 
         assert!(solid_geometry_result.is_err());
-        /*assert_eq!(
-            solid_geometry_result.unwrap_err().to_string(),
-            "XLink members are not supported yet"
-        );*/
     }
 
     #[test]
-    fn parsing_solid_without_ids() {
+    fn deserialize_solid_without_ids() {
         let xml_document = b"\
         <gml:Solid>
           <gml:exterior>
@@ -134,28 +182,45 @@ mod tests {
           </gml:exterior>
         </gml:Solid>";
 
-        let solid_geometry = parse_solid(xml_document.as_ref()).unwrap();
+        let solid_geometry = deserialize_solid(xml_document.as_ref()).unwrap();
 
         assert_eq!(solid_geometry.members().len(), 2);
     }
 
-    /*#[test]
-    fn parsing_solid_with_xlinks_only() {
-        // TODO
-        let xml_document = b"\
-        <gml:Solid srsDimension=\"3\">
-          <gml:exterior>
-            <gml:Shell>
-              <gml:surfaceMember xlink:href=\"#DEBY_LOD2_4905373_a8f507d0-7f89-4966-8f8d-0ffa02508922_poly\"/>
-              <gml:surfaceMember xlink:href=\"#DEBY_LOD2_4905373_d2691fca-4e89-404c-80f8-fc90794581d8_poly\"/>
-              <gml:surfaceMember xlink:href=\"#DEBY_LOD2_4905373_f3d48f8e-6ae2-49ea-9dd8-4f08af06a738_poly\"/>
-              <gml:surfaceMember xlink:href=\"#DEBY_LOD2_4905373_1dea43d2-0e28-4010-9297-606eb7abcc42_poly\"/>
-            </gml:Shell>
-          </gml:exterior>
-        </gml:Solid>";
+    #[test]
+    fn serialize_solid_writes_gml_tags() {
+        let solid = make_solid();
+        let xml = serialize_solid(&solid).unwrap();
 
-        let solid_geometry = parse_solid(xml_document.as_ref()).unwrap();
+        assert!(xml.contains("<gml:Solid"));
+        assert!(xml.contains("<gml:exterior"));
+        assert!(xml.contains("<gml:Shell"));
+        assert!(xml.contains("<gml:surfaceMember"));
+        assert!(xml.contains("<gml:Polygon"));
+        assert!(!xml.contains("id="));
+    }
 
-        //assert_eq!(solid_geometry.members().len(), 4);
-    }*/
+    #[test]
+    fn round_trip_solid_preserves_member_count() {
+        let solid = make_solid();
+        let xml = serialize_solid(&solid).unwrap();
+        let recovered = deserialize_solid(xml.as_bytes()).unwrap();
+
+        assert_eq!(recovered.members().len(), solid.members().len());
+    }
+
+    #[test]
+    fn round_trip_solid_from_xml() {
+        let input_xml = "<gml:Solid gml:id=\"test-id\">\
+            <gml:exterior><gml:Shell>\
+            <gml:surfaceMember><gml:Polygon><gml:exterior><gml:LinearRing><gml:posList srsDimension=\"3\">0 0 0 1 0 0 0 1 0 0 0 0</gml:posList></gml:LinearRing></gml:exterior></gml:Polygon></gml:surfaceMember>\
+            </gml:Shell></gml:exterior>\
+            </gml:Solid>";
+
+        let gml: GmlSolid = quick_xml::de::from_reader(input_xml.as_bytes()).unwrap();
+        let solid: Solid = gml.try_into().unwrap();
+        let output_xml = serialize_solid(&solid).unwrap();
+
+        assert_eq!(input_xml, output_xml);
+    }
 }

@@ -7,6 +7,10 @@ use crate::model::geometry::primitives::{
 use crate::model::geometry::{DirectPosition, Envelope};
 use nalgebra::Isometry3;
 
+/// Base data shared by all GML surface geometry types (ISO 19136 §10.5.3).
+///
+/// A surface is a 2-D geometric primitive.  Concrete surface types include
+/// [`Polygon`], [`Surface`], and [`CompositeSurface`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AbstractSurface {
     pub(crate) abstract_geometric_primitive: AbstractGeometricPrimitive,
@@ -20,11 +24,15 @@ impl AbstractSurface {
     }
 }
 
+/// Object-safe read accessor for [`AbstractSurface`] fields.
 pub trait AsAbstractSurface: AsAbstractGeometricPrimitive {
+    /// Returns a reference to the embedded [`AbstractSurface`] base data.
     fn abstract_surface(&self) -> &AbstractSurface;
 }
 
+/// Mutable companion to [`AsAbstractSurface`].
 pub trait AsAbstractSurfaceMut: AsAbstractSurface + AsAbstractGeometricPrimitiveMut {
+    /// Returns a mutable reference to the embedded [`AbstractSurface`] base data.
     fn abstract_surface_mut(&mut self) -> &mut AbstractSurface;
 }
 
@@ -40,6 +48,7 @@ impl AsAbstractSurfaceMut for AbstractSurface {
     }
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_abstract_surface_traits {
     ($type:ty) => {
@@ -67,10 +76,14 @@ macro_rules! impl_abstract_surface_traits {
 
 impl_abstract_surface_traits!(AbstractSurface);
 
+/// Discriminated union of all concrete surface implementations.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SurfaceKind {
+    /// A patched [`Surface`].
     Surface(Surface),
+    /// A planar [`Polygon`].
     Polygon(Polygon),
+    /// A topology-aware [`CompositeSurface`].
     CompositeSurface(CompositeSurface),
 }
 

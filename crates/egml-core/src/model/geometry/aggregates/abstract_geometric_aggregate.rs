@@ -1,5 +1,9 @@
 use crate::model::geometry::{AbstractGeometry, AsAbstractGeometry, AsAbstractGeometryMut};
 
+/// Base data shared by all GML multi-geometry aggregate types (ISO 19136 §10.6).
+///
+/// An aggregate groups homogeneous geometry primitives without imposing
+/// topological constraints between them.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AbstractGeometricAggregate {
     pub(crate) abstract_geometry: AbstractGeometry,
@@ -11,13 +15,17 @@ impl AbstractGeometricAggregate {
     }
 }
 
+/// Object-safe read accessor for [`AbstractGeometricAggregate`] fields.
 pub trait AsAbstractGeometricAggregate: AsAbstractGeometry {
+    /// Returns a reference to the embedded [`AbstractGeometricAggregate`] base data.
     fn abstract_geometric_aggregate(&self) -> &AbstractGeometricAggregate;
 }
 
+/// Mutable companion to [`AsAbstractGeometricAggregate`].
 pub trait AsAbstractGeometricAggregateMut:
     AsAbstractGeometricAggregate + AsAbstractGeometryMut
 {
+    /// Returns a mutable reference to the embedded [`AbstractGeometricAggregate`] base data.
     fn abstract_geometric_aggregate_mut(&mut self) -> &mut AbstractGeometricAggregate;
 }
 
@@ -33,6 +41,7 @@ impl AsAbstractGeometricAggregateMut for AbstractGeometricAggregate {
     }
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_abstract_geometric_aggregate_traits {
     ($type:ty) => {

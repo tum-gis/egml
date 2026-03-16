@@ -1,6 +1,6 @@
 use crate::Error;
-use crate::Error::{MissingElements, Only3DSupported};
-use crate::util::deserialize_space_separated_f64;
+use crate::Error::{MissingElements, UnsupportedDimension};
+use crate::util::{deserialize_space_separated_f64, serialize_space_separated_f64};
 use egml_core::model::geometry::DirectPosition;
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +11,8 @@ pub struct GmlDirectPosition {
 
     #[serde(
         rename = "$value",
-        deserialize_with = "deserialize_space_separated_f64"
+        deserialize_with = "deserialize_space_separated_f64",
+        serialize_with = "serialize_space_separated_f64"
     )]
     value: Vec<f64>,
 }
@@ -21,7 +22,7 @@ impl TryFrom<GmlDirectPosition> for DirectPosition {
 
     fn try_from(item: GmlDirectPosition) -> Result<Self, Self::Error> {
         if item.srs_dimension.unwrap_or(3) != 3 {
-            return Err(Only3DSupported());
+            return Err(UnsupportedDimension());
         }
 
         if item.value.len() != 3 {
@@ -33,6 +34,15 @@ impl TryFrom<GmlDirectPosition> for DirectPosition {
     }
 }
 
+impl From<&DirectPosition> for GmlDirectPosition {
+    fn from(pos: &DirectPosition) -> Self {
+        Self {
+            srs_dimension: Some(3),
+            value: vec![pos.x(), pos.y(), pos.z()],
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::GmlDirectPosition;
@@ -40,7 +50,7 @@ mod tests {
     use quick_xml::{DeError, de};
 
     #[test]
-    fn parsing_point() {
+    fn deserialize_direct_position() {
         let xml_document = "<gml:pos srsDimension=\"3\" gml:id=\"UUID_6b33ecfa-6e08-4e8e-a4b5-e1d06540faf0\">678000.9484065345 5403659.060043676 417.3802376791456</gml:pos>";
 
         let parsed_result: Result<GmlDirectPosition, DeError> =

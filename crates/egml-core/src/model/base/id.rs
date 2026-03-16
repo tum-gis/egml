@@ -4,27 +4,64 @@ use std::fmt;
 use std::fmt::Write;
 use uuid::Uuid;
 
+/// A stable, globally unique identifier for a GML object.
+///
+/// Corresponds to the `gml:id` XML attribute (ISO 19136 §7.2.2).
+/// An `Id` is a non-empty string; it can be constructed from arbitrary
+/// bytes or strings by hashing them with SHA-256, or generated as a
+/// random UUID v4.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct Id(String);
 
 impl Id {
-    /// Constructs an Id by hashing the provided bytes using SHA-256.
-    /// The resulting Id is a 64-character uppercase hex string.
+    /// Constructs an `Id` by hashing bytes using SHA-256.
+    ///
+    /// The resulting id is a 64-character uppercase hex string.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use egml_core::model::base::Id;
+    ///
+    /// let id = Id::from_hashed_bytes(b"hello");
+    /// assert_eq!(id.to_string().len(), 64);
+    /// ```
     pub fn from_hashed_bytes(val: impl AsRef<[u8]>) -> Self {
         Self(Self::hash_bytes_to_hex(val.as_ref()))
     }
 
-    /// Constructs an Id by hashing the provided string using SHA-256.
+    /// Constructs an `Id` by hashing a string using SHA-256.
+    ///
+    /// Two calls with equal strings always produce the same id.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use egml_core::model::base::Id;
+    ///
+    /// let id_a = Id::from_hashed_string("object-42");
+    /// let id_b = Id::from_hashed_string("object-42");
+    /// assert_eq!(id_a, id_b);
+    /// ```
     pub fn from_hashed_string(val: &str) -> Self {
         Self::from_hashed_bytes(val.as_bytes())
     }
 
-    /// Constructs an Id by hashing the provided u64 using SHA-256.
+    /// Constructs an `Id` by hashing a `u64` using SHA-256 (little-endian bytes).
     pub fn from_hashed_u64(val: u64) -> Self {
         Self::from_hashed_bytes(val.to_le_bytes())
     }
 
-    /// Generate a random UUID v4
+    /// Generates a random UUID v4 as an `Id`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use egml_core::model::base::Id;
+    ///
+    /// let id = Id::generate_uuid_v4();
+    /// assert!(!id.to_string().is_empty());
+    /// ```
     pub fn generate_uuid_v4() -> Self {
         Self(Uuid::new_v4().to_string())
     }
@@ -55,9 +92,12 @@ impl From<Id> for String {
 impl TryFrom<&String> for Id {
     type Error = Error;
 
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyCollection`] if the string is empty.
     fn try_from(item: &String) -> Result<Self, Self::Error> {
         if item.is_empty() {
-            Err(Error::MustNotBeEmpty("id"))
+            Err(Error::EmptyCollection("id"))
         } else {
             Ok(Self(item.to_string()))
         }
@@ -67,9 +107,12 @@ impl TryFrom<&String> for Id {
 impl TryFrom<&str> for Id {
     type Error = Error;
 
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyCollection`] if the string slice is empty.
     fn try_from(item: &str) -> Result<Self, Self::Error> {
         if item.is_empty() {
-            Err(Error::MustNotBeEmpty("id"))
+            Err(Error::EmptyCollection("id"))
         } else {
             Ok(Self(item.to_string()))
         }
@@ -79,9 +122,12 @@ impl TryFrom<&str> for Id {
 impl TryFrom<String> for Id {
     type Error = Error;
 
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyCollection`] if the owned string is empty.
     fn try_from(item: String) -> Result<Self, Self::Error> {
         if item.is_empty() {
-            Err(Error::MustNotBeEmpty("id"))
+            Err(Error::EmptyCollection("id"))
         } else {
             Ok(Self(item))
         }
@@ -103,13 +149,13 @@ impl fmt::Display for Id {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Error::MustNotBeEmpty;
+    use crate::Error::EmptyCollection;
 
     #[test]
     fn id_from_empty_string() {
         let result = Id::try_from("".to_string());
 
-        assert_eq!(result, Err(MustNotBeEmpty("id")));
+        assert_eq!(result, Err(EmptyCollection("id")));
     }
 
     #[test]
