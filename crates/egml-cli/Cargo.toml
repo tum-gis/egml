@@ -11,7 +11,7 @@ description = "CLI tool for processing GML data."
 
 
 [dependencies]
-egml = { version = "0.0.1-alpha.14", path = "../egml" }
+egml = { version = "0.0.2-alpha.1", path = "../egml" }
 
 thiserror = { workspace = true }
 anyhow = { workspace = true }

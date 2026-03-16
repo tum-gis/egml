@@ -11,7 +11,7 @@ description = "Supplementary operations for GML data."
 
 
 [dependencies]
-egml-core = { version = "0.0.1-alpha.14", path = "../egml-core" }
+egml-core = { version = "0.0.2-alpha.1", path = "../egml-core" }
 
 thiserror = { workspace = true }
 nalgebra = { workspace = true }
