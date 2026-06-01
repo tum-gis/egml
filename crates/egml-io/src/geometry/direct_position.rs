@@ -1,5 +1,4 @@
 use crate::Error;
-use crate::Error::{MissingElements, UnsupportedDimension};
 use crate::util::{deserialize_space_separated_f64, serialize_space_separated_f64};
 use egml_core::model::geometry::DirectPosition;
 use serde::{Deserialize, Serialize};
@@ -22,11 +21,15 @@ impl TryFrom<GmlDirectPosition> for DirectPosition {
 
     fn try_from(item: GmlDirectPosition) -> Result<Self, Self::Error> {
         if item.srs_dimension.unwrap_or(3) != 3 {
-            return Err(UnsupportedDimension());
+            return Err(Error::UnsupportedDimension {
+                found: item.srs_dimension.unwrap_or(0),
+            });
         }
 
         if item.value.len() != 3 {
-            return Err(MissingElements("not a multiple of 3".to_string()));
+            return Err(Error::InvalidCoordinateCount {
+                count: item.value.len(),
+            });
         }
 
         let position = DirectPosition::new(item.value[0], item.value[1], item.value[2])?;

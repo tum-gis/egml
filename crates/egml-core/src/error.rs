@@ -1,93 +1,164 @@
 use crate::model::base::Id;
-use thiserror::Error;
+use crate::model::geometry::DirectPosition;
+use std::fmt;
 
 /// Errors returned by `egml-core` operations.
-#[derive(Error, Debug, Eq, PartialEq, Hash, Clone)]
+#[derive(Debug, PartialEq, Clone)]
+#[non_exhaustive]
 pub enum Error {
     /// Returned when a floating-point coordinate is not finite (NaN or ±infinity).
     ///
-    /// The inner string names the offending coordinate component: `"x"`, `"y"`, or `"z"`.
-    /// GML requires all coordinate values in a `DirectPosition` to be real numbers
-    /// (ISO 19136 §9.4 `DirectPositionType`).
-    #[error(
-        "coordinate '{0}' has a non-finite value (NaN or ±infinity); all GML coordinate values must be real numbers (ISO 19136 §9.4)"
-    )]
-    NonFiniteCoordinate(&'static str),
+    /// `axis` names the offending component (`"x"`, `"y"`, or `"z"`); `value` is
+    /// the actual non-finite number that was supplied.
+    NonFiniteCoordinate { axis: &'static str, value: f64 },
 
     /// Returned when a collection has fewer elements than the minimum required by
     /// the GML geometry constraint.
     ///
-    /// The inner string is a human-readable description of the violated constraint,
-    /// e.g. `"LinearRing requires at least 3 positions (ISO 19136 §10.5.12)"`.
-    #[error(
-        "{geometry} requires at least {minimum} elements ({spec:?}) [id={id:?}] [message={message:?}]"
-    )]
+    /// Optional fields carry progressively more context: `spec` cites the ISO
+    /// clause, `id` names the offending GML object, and `detail` gives a
+    /// human-readable description of the actual content that was supplied.
     TooFewElements {
         geometry: &'static str,
         minimum: usize,
         spec: Option<&'static str>,
         id: Option<Id>,
-        message: Option<String>,
+        detail: Option<String>,
     },
 
-    /// Returned when a collection contains a number of elements that is not
-    /// accepted by the operation (e.g. a `Triangle` not given exactly 3 points).
+    /// Returned when two positions that must be distinct are identical.
     ///
-    /// The inner string describes which collection or argument was invalid.
-    #[error("invalid number of elements: {0}")]
-    WrongElementCount(&'static str),
+    /// Applies to [`Triangle`](crate::model::geometry::primitives::Triangle)
+    /// vertices ([OGC 07-036 §10.5.12.5](https://docs.ogc.org/is/07-036/07-036.pdf)).
+    IdenticalPositions {
+        first: DirectPosition,
+        second: DirectPosition,
+    },
 
-    /// Returned when an operation requires a non-empty input but received an empty one.
+    /// Returned when adjacent positions in a sequence are equal.
     ///
-    /// The inner string names the offending parameter or context (e.g. `"solid"`,
-    /// `"multi curve"`).
-    #[error("'{0}' must not be empty")]
-    EmptyCollection(&'static str),
-
-    /// Returned when a geometry contains two identical positions where all positions
-    /// must be distinct (e.g. all three vertices of a [`Triangle`](crate::model::geometry::primitives::Triangle)
-    /// must be different, per ISO 19136 §10.5.9).
-    #[error(
-        "geometry contains two identical positions; all positions must be distinct (ISO 19136 §10.5.9)"
-    )]
-    IdenticalPositions,
-
-    /// Returned when adjacent positions in a sequence are equal and the geometry type
-    /// requires all consecutive positions to differ.
-    ///
-    /// Applies to [`LinearRing`](crate::model::geometry::primitives::LinearRing)
-    /// (ISO 19136 §10.5.12) and [`LineString`](crate::model::geometry::primitives::LineString)
-    /// (ISO 19136 §10.4.4).
-    #[error(
-        "sequence contains adjacent duplicate positions; consecutive coordinates must be distinct (ISO 19136 §10.4.3)"
-    )]
-    AdjacentDuplicatePositions,
+    /// `index` is the zero-based index of the first position in the duplicate
+    /// pair; `position` is its value. Applies to
+    /// [`LinearRing`](crate::model::geometry::primitives::LinearRing)
+    /// ([OGC 07-036 §10.5.8](https://docs.ogc.org/is/07-036/07-036.pdf)) and
+    /// [`LineString`](crate::model::geometry::primitives::LineString)
+    /// ([OGC 07-036 §10.4.4](https://docs.ogc.org/is/07-036/07-036.pdf)).
+    AdjacentDuplicatePositions {
+        index: usize,
+        position: DirectPosition,
+    },
 
     /// Returned when the first and last position of a ring are equal.
     ///
-    /// A `gml:LinearRing` is implicitly closed: the geometry engine connects the
-    /// last position back to the first automatically.  An explicit repeated closing
-    /// vertex is therefore redundant and invalid (ISO 19136 §10.5.12).
-    #[error(
-        "linear ring has matching first and last positions; gml:LinearRing is implicitly closed and must not include an explicit closing vertex (ISO 19136 §10.5.12)"
-    )]
-    RepeatedClosingVertex,
+    /// `position` is the repeated vertex. A `gml:LinearRing` is implicitly
+    /// closed and must not include an explicit closing vertex ([OGC 07-036 §10.5.8](https://docs.ogc.org/is/07-036/07-036.pdf)).
+    RepeatedClosingVertex { position: DirectPosition },
 
     /// Returned when an [`Envelope`](crate::model::geometry::Envelope) is constructed
-    /// with a lower corner that is strictly greater than the upper corner in one or
-    /// more coordinate components.
+    /// with a lower corner that strictly exceeds the upper corner along `axis`.
     ///
-    /// The inner string names the offending component (`"x"`, `"y"`, or `"z"`).
-    /// ISO 19136 §10.1.4 requires `lowerCorner ≤ upperCorner` in every component.
-    #[error(
-        "envelope lowerCorner.{0} exceeds upperCorner.{0}; each component of lowerCorner must be ≤ the corresponding upperCorner component (ISO 19136 §10.1.4)"
-    )]
-    InvalidEnvelopeBounds(&'static str),
+    /// `lower` and `upper` are the actual conflicting coordinate values.
+    /// [OGC 07-036 §10.1.4.6](https://docs.ogc.org/is/07-036/07-036.pdf) requires `lowerCorner ≤ upperCorner` in every component.
+    InvalidEnvelopeBounds {
+        axis: &'static str,
+        lower: f64,
+        upper: f64,
+    },
+
+    /// Returned when
+    /// [`Envelope::to_triangulated_surface`](crate::model::geometry::Envelope::to_triangulated_surface)
+    /// is called on an envelope that is neither a surface nor a volume.
+    ///
+    /// `non_zero_extents` is the number of axes with non-zero extent (0 or 1).
+    NotSurfaceOrVolume { non_zero_extents: u8 },
+
+    /// Returned when [`Envelope::to_polygon`](crate::model::geometry::Envelope::to_polygon)
+    /// is called on an envelope that does not have exactly two non-zero extents.
+    ///
+    /// `non_zero_extents` is the actual number of axes with non-zero extent.
+    NotASurface { non_zero_extents: u8 },
+
+    /// Returned when [`Envelope::to_solid`](crate::model::geometry::Envelope::to_solid)
+    /// is called on an envelope that does not have all three extents non-zero.
+    ///
+    /// `non_zero_extents` is the actual number of axes with non-zero extent.
+    NotAVolume { non_zero_extents: u8 },
 
     /// Returned when the earcut polygon triangulation algorithm produces no triangles.
     ///
-    /// The inner string provides additional context about the failure (e.g. which
-    /// polygon or patch could not be decomposed).
-    #[error("polygon triangulation (earcut) failed: {0}")]
-    TriangulationFailed(&'static str),
+    /// `context` provides additional information about which polygon or patch
+    /// could not be decomposed.
+    TriangulationFailed { context: String },
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::NonFiniteCoordinate { axis, value } => write!(
+                f,
+                "coordinate '{axis}' has non-finite value {value}; \
+                 all GML coordinate values must be real numbers (OGC 07-036 §10.1.4.1)"
+            ),
+            Error::TooFewElements {
+                geometry,
+                minimum,
+                spec,
+                id,
+                detail,
+            } => {
+                write!(f, "{geometry} requires at least {minimum} element(s)")?;
+                if let Some(s) = spec {
+                    write!(f, " ({s})")?;
+                }
+                if let Some(i) = id {
+                    write!(f, " [id={i}]")?;
+                }
+                if let Some(d) = detail {
+                    write!(f, ": {d}")?;
+                }
+                Ok(())
+            }
+            Error::IdenticalPositions { first, second } => write!(
+                f,
+                "geometry contains two identical positions {first} and {second}; \
+                 all positions must be distinct (OGC 07-036 §10.5.12.5)"
+            ),
+            Error::AdjacentDuplicatePositions { index, position } => write!(
+                f,
+                "adjacent duplicate positions at index {index} ({position}); \
+                 consecutive coordinates must be distinct"
+            ),
+            Error::RepeatedClosingVertex { position } => write!(
+                f,
+                "linear ring has repeated closing vertex at {position}; \
+                 gml:LinearRing is implicitly closed and must not include \
+                 an explicit closing vertex (OGC 07-036 §10.5.8)"
+            ),
+            Error::InvalidEnvelopeBounds { axis, lower, upper } => write!(
+                f,
+                "envelope lower.{axis}={lower} exceeds upper.{axis}={upper}; \
+                 lowerCorner must be ≤ upperCorner in every component (OGC 07-036 §10.1.4.6)"
+            ),
+            Error::NotSurfaceOrVolume { non_zero_extents } => write!(
+                f,
+                "envelope has {non_zero_extents} non-zero extent(s) and cannot be triangulated; \
+                 requires a surface (2 non-zero extents) or volume (3 non-zero extents)"
+            ),
+            Error::NotASurface { non_zero_extents } => write!(
+                f,
+                "envelope has {non_zero_extents} non-zero extent(s); \
+                 to_polygon requires exactly 2"
+            ),
+            Error::NotAVolume { non_zero_extents } => write!(
+                f,
+                "envelope has {non_zero_extents} non-zero extent(s); \
+                 to_solid requires all 3 to be non-zero"
+            ),
+            Error::TriangulationFailed { context } => {
+                write!(f, "polygon triangulation (earcut) failed: {context}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {}

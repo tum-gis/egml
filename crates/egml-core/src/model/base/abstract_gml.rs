@@ -1,6 +1,6 @@
 use crate::model::base::Id;
 
-/// Base data shared by every GML object (ISO 19136 §7.2.2, `gml:AbstractGMLType`).
+/// Base data shared by every GML object ([OGC 07-036 §7.2.2.2](https://docs.ogc.org/is/07-036/07-036.pdf), `gml:AbstractGMLType`).
 ///
 /// Every GML object carries an optional stable [`Id`] and zero-or-more human-readable
 /// name strings.  Concrete geometry and feature types embed `AbstractGml` and

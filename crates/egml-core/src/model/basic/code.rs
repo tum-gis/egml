@@ -9,16 +9,49 @@
 /// ```rust
 /// use egml_core::model::basic::Code;
 ///
-/// let code = Code {
-///     code_space: Some("https://example.org/codes".to_string()),
-///     value: "WallSurface".to_string(),
-/// };
-/// assert_eq!(code.value, "WallSurface");
+///
+/// let code = Code::with_code_space("https://example.org/codes", "WallSurface");
+/// assert_eq!(code.value(), "WallSurface");
 /// ```
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Code {
     /// Optional URI identifying the code list or dictionary.
-    pub code_space: Option<String>,
+    code_space: Option<String>,
     /// The code value string.
-    pub value: String,
+    value: String,
+}
+
+impl Code {
+    /// Creates a new `Code` without a code space.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self {
+            code_space: None,
+            value: value.into(),
+        }
+    }
+
+    /// Creates a new `Code` with a code space.
+    pub fn with_code_space(code_space: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            code_space: Some(code_space.into()),
+            value: value.into(),
+        }
+    }
+
+    pub fn from_parts(code_space: Option<impl Into<String>>, value: impl Into<String>) -> Self {
+        Self {
+            code_space: code_space.map(Into::into),
+            value: value.into(),
+        }
+    }
+
+    /// Returns the code value.
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    /// Returns the optional code-space URI.
+    pub fn code_space(&self) -> Option<&str> {
+        self.code_space.as_deref()
+    }
 }

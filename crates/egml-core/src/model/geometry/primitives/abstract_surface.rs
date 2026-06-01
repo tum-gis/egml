@@ -7,7 +7,7 @@ use crate::model::geometry::primitives::{
 use crate::model::geometry::{DirectPosition, Envelope};
 use nalgebra::Isometry3;
 
-/// Base data shared by all GML surface geometry types (ISO 19136 §10.5.3).
+/// Base data shared by all GML surface geometry types ([OGC 07-036 §10.5.1](https://docs.ogc.org/is/07-036/07-036.pdf)).
 ///
 /// A surface is a 2-D geometric primitive.  Concrete surface types include
 /// [`Polygon`], [`Surface`], and [`CompositeSurface`].

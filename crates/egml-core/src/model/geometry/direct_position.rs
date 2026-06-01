@@ -35,13 +35,22 @@ impl DirectPosition {
     /// ```
     pub fn new(x: f64, y: f64, z: f64) -> Result<Self, Error> {
         if !x.is_finite() {
-            return Err(Error::NonFiniteCoordinate("x"));
+            return Err(Error::NonFiniteCoordinate {
+                axis: "x",
+                value: x,
+            });
         }
         if !y.is_finite() {
-            return Err(Error::NonFiniteCoordinate("y"));
+            return Err(Error::NonFiniteCoordinate {
+                axis: "y",
+                value: y,
+            });
         }
         if !z.is_finite() {
-            return Err(Error::NonFiniteCoordinate("z"));
+            return Err(Error::NonFiniteCoordinate {
+                axis: "z",
+                value: z,
+            });
         }
 
         Ok(Self { x, y, z })
@@ -74,7 +83,10 @@ impl DirectPosition {
     /// Returns [`Error::NonFiniteCoordinate`] with the name `"x"` if `val` is NaN or infinite.
     pub fn set_x(&mut self, val: f64) -> Result<(), Error> {
         if !val.is_finite() {
-            return Err(Error::NonFiniteCoordinate("x"));
+            return Err(Error::NonFiniteCoordinate {
+                axis: "x",
+                value: val,
+            });
         }
         self.x = val;
         Ok(())
@@ -87,7 +99,10 @@ impl DirectPosition {
     /// Returns [`Error::NonFiniteCoordinate`] with the name `"y"` if `val` is NaN or infinite.
     pub fn set_y(&mut self, val: f64) -> Result<(), Error> {
         if !val.is_finite() {
-            return Err(Error::NonFiniteCoordinate("y"));
+            return Err(Error::NonFiniteCoordinate {
+                axis: "y",
+                value: val,
+            });
         }
         self.y = val;
         Ok(())
@@ -100,7 +115,10 @@ impl DirectPosition {
     /// Returns [`Error::NonFiniteCoordinate`] with the name `"z"` if `val` is NaN or infinite.
     pub fn set_z(&mut self, val: f64) -> Result<(), Error> {
         if !val.is_finite() {
-            return Err(Error::NonFiniteCoordinate("z"));
+            return Err(Error::NonFiniteCoordinate {
+                axis: "z",
+                value: val,
+            });
         }
         self.z = val;
         Ok(())

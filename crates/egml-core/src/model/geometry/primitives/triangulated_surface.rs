@@ -8,7 +8,7 @@ use crate::model::geometry::primitives::{
 use nalgebra::Isometry3;
 /// A 2-D surface composed exclusively of [`Triangle`] patches.
 ///
-/// Corresponds to `gml:TriangulatedSurface` in ISO 19136 §10.5.14.
+/// Corresponds to `gml:TriangulatedSurface` in [OGC 07-036 §10.5.11.4](https://docs.ogc.org/is/07-036/07-036.pdf).
 /// This type is the primary output of triangulation operations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TriangulatedSurface {
@@ -25,10 +25,16 @@ impl TriangulatedSurface {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::EmptyCollection`] if `triangles` is empty.
+    /// Returns [`Error::TooFewElements`] if `triangles` is empty.
     pub fn from_triangles(triangles: Vec<Triangle>) -> Result<Self, Error> {
         if triangles.is_empty() {
-            return Err(Error::EmptyCollection("triangulated surface"));
+            return Err(Error::TooFewElements {
+                geometry: "gml:TriangulatedSurface",
+                minimum: 1,
+                spec: Some("OGC 07-036 §10.5.11.4"),
+                id: None,
+                detail: None,
+            });
         }
 
         let patches: Vec<SurfacePatchKind> = triangles
@@ -48,10 +54,16 @@ impl TriangulatedSurface {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::EmptyCollection`] if `surfaces` is empty.
+    /// Returns [`Error::TooFewElements`] if `surfaces` is empty.
     pub fn from_triangulated_surfaces(surfaces: Vec<TriangulatedSurface>) -> Result<Self, Error> {
         if surfaces.is_empty() {
-            return Err(Error::EmptyCollection("surfaces to combine"));
+            return Err(Error::TooFewElements {
+                geometry: "TriangulatedSurface::from_triangulated_surfaces",
+                minimum: 1,
+                spec: None,
+                id: None,
+                detail: None,
+            });
         }
 
         let patches: Vec<SurfacePatchKind> = surfaces

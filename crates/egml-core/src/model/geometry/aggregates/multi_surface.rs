@@ -10,7 +10,7 @@ use rayon::prelude::*;
 
 /// An unordered collection of [`SurfaceKind`] members.
 ///
-/// Corresponds to `gml:MultiSurface` in ISO 19136 §10.6.4.
+/// Corresponds to `gml:MultiSurface` in [OGC 07-036 §11.3.4.1](https://docs.ogc.org/is/07-036/07-036.pdf).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MultiSurface {
     pub(crate) abstract_geometric_aggregate: AbstractGeometricAggregate,
@@ -22,13 +22,19 @@ impl MultiSurface {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::EmptyCollection`] if `members` is empty.
+    /// Returns [`Error::TooFewElements`] if `members` is empty.
     pub fn new(
         abstract_geometric_aggregate: AbstractGeometricAggregate,
         members: Vec<SurfaceKind>,
     ) -> Result<Self, Error> {
         if members.is_empty() {
-            return Err(Error::EmptyCollection("multi surface"));
+            return Err(Error::TooFewElements {
+                geometry: "gml:MultiSurface",
+                minimum: 1,
+                spec: Some("OGC 07-036 §11.3.4.1"),
+                id: None,
+                detail: None,
+            });
         }
 
         Ok(Self {
@@ -46,10 +52,16 @@ impl MultiSurface {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::EmptyCollection`] if `val` is empty.
+    /// Returns [`Error::TooFewElements`] if `val` is empty.
     pub fn set_surface_member(&mut self, val: Vec<SurfaceKind>) -> Result<(), Error> {
         if val.is_empty() {
-            return Err(Error::EmptyCollection("multi surface"));
+            return Err(Error::TooFewElements {
+                geometry: "gml:MultiSurface",
+                minimum: 1,
+                spec: Some("OGC 07-036 §11.3.4.1"),
+                id: None,
+                detail: None,
+            });
         }
         self.surface_member = val;
         Ok(())

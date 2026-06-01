@@ -1,7 +1,10 @@
 use crate::error::Error;
-use crate::error::Error::InvalidEnvelopeBounds;
 use crate::model::geometry::DirectPosition;
-use nalgebra::{Point3, Vector3};
+use crate::model::geometry::primitives::{
+    AbstractRing, AbstractSolid, AbstractSurface, LinearRing, Polygon, RingPropertyKind, Solid,
+    SurfaceKind, SurfaceProperty, TriangulatedSurface,
+};
+use nalgebra::{Isometry3, Point3, Vector3};
 use std::fmt;
 
 /// Axis-aligned bounding box in 3-D space.
@@ -41,13 +44,25 @@ impl Envelope {
     /// ```
     pub fn new(lower_corner: DirectPosition, upper_corner: DirectPosition) -> Result<Self, Error> {
         if lower_corner.x() > upper_corner.x() {
-            return Err(InvalidEnvelopeBounds("x"));
+            return Err(Error::InvalidEnvelopeBounds {
+                axis: "x",
+                lower: lower_corner.x(),
+                upper: upper_corner.x(),
+            });
         }
         if lower_corner.y() > upper_corner.y() {
-            return Err(InvalidEnvelopeBounds("y"));
+            return Err(Error::InvalidEnvelopeBounds {
+                axis: "y",
+                lower: lower_corner.y(),
+                upper: upper_corner.y(),
+            });
         }
         if lower_corner.z() > upper_corner.z() {
-            return Err(InvalidEnvelopeBounds("z"));
+            return Err(Error::InvalidEnvelopeBounds {
+                axis: "z",
+                lower: lower_corner.z(),
+                upper: upper_corner.z(),
+            });
         }
 
         Ok(Self {
@@ -125,6 +140,53 @@ impl Envelope {
         self.size_x() * self.size_y() * self.size_z()
     }
 
+    /// Returns `true` if the lower and upper corners are equal, i.e. the envelope collapses to a point.
+    pub fn is_point(&self) -> bool {
+        self.lower_corner == self.upper_corner
+    }
+
+    /// Returns `true` if exactly one axis has non-zero extent (a line segment).
+    #[allow(clippy::nonminimal_bool)]
+    pub fn is_linear(&self) -> bool {
+        let nx = self.size_x() > 0.0;
+        let ny = self.size_y() > 0.0;
+        let nz = self.size_z() > 0.0;
+        (nx && !ny && !nz) || (!nx && ny && !nz) || (!nx && !ny && nz)
+    }
+
+    /// Returns `true` if exactly two axes have non-zero extent (a flat rectangle).
+    #[allow(clippy::nonminimal_bool)]
+    pub fn is_surface(&self) -> bool {
+        let nx = self.size_x() > 0.0;
+        let ny = self.size_y() > 0.0;
+        let nz = self.size_z() > 0.0;
+        (nx && ny && !nz) || (nx && !ny && nz) || (!nx && ny && nz)
+    }
+
+    /// Returns `true` if all three axes have non-zero extent.
+    pub fn is_volume(&self) -> bool {
+        self.size_x() > 0.0 && self.size_y() > 0.0 && self.size_z() > 0.0
+    }
+
+    fn non_zero_extents(&self) -> u8 {
+        [self.size_x(), self.size_y(), self.size_z()]
+            .iter()
+            .filter(|&&s| s > 0.0)
+            .count() as u8
+    }
+
+    /// Returns the center point of the envelope.
+    ///
+    /// Computed as `lower + size / 2` to avoid overflow with large coordinates.
+    pub fn center(&self) -> DirectPosition {
+        DirectPosition::new(
+            self.lower_corner.x() + self.size_x() / 2.0,
+            self.lower_corner.y() + self.size_y() / 2.0,
+            self.lower_corner.z() + self.size_z() / 2.0,
+        )
+        .expect("envelope corners are finite")
+    }
+
     /// Returns `true` if `point` lies inside or on the boundary of this envelope.
     pub fn contains(&self, point: &DirectPosition) -> bool {
         let lower_corner: Point3<f64> = self.lower_corner.into();
@@ -167,6 +229,46 @@ impl Envelope {
 
         Envelope::new(lower_corner, upper_corner)
     }
+
+    /// Applies a rigid-body isometry (rotation + translation) to this envelope in place.
+    ///
+    /// Both corners are transformed and the result is re-fitted as an axis-aligned bounding
+    /// box by taking per-axis minima/maxima. This keeps the AABB invariant valid after
+    /// rotation, at the cost of a potentially larger box for non-axis-aligned rotations.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use egml_core::model::geometry::{DirectPosition, Envelope};
+    /// use nalgebra::{Isometry3, Vector3};
+    ///
+    /// let lo = DirectPosition::new(0.0, 0.0, 0.0).unwrap();
+    /// let hi = DirectPosition::new(1.0, 2.0, 3.0).unwrap();
+    /// let mut env = Envelope::new(lo, hi).unwrap();
+    ///
+    /// let translation = Isometry3::translation(10.0, 0.0, 0.0);
+    /// env.apply_transform(&translation);
+    ///
+    /// assert_eq!(env.lower_corner().x(), 10.0);
+    /// assert_eq!(env.upper_corner().x(), 11.0);
+    /// ```
+    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
+        let transformed_lower_corner: Point3<f64> = m * Point3::from(self.lower_corner);
+        let transformed_upper_corner: Point3<f64> = m * Point3::from(self.upper_corner);
+
+        self.lower_corner = DirectPosition::new(
+            transformed_lower_corner.x.min(transformed_upper_corner.x),
+            transformed_lower_corner.y.min(transformed_upper_corner.y),
+            transformed_lower_corner.z.min(transformed_upper_corner.z),
+        )
+        .expect("envelope corners are finite");
+        self.upper_corner = DirectPosition::new(
+            transformed_lower_corner.x.max(transformed_upper_corner.x),
+            transformed_lower_corner.y.max(transformed_upper_corner.y),
+            transformed_lower_corner.z.max(transformed_upper_corner.z),
+        )
+        .expect("envelope corners are finite");
+    }
 }
 
 impl Envelope {
@@ -203,10 +305,16 @@ impl Envelope {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::EmptyCollection`] if `points` is empty.
+    /// Returns [`Error::TooFewElements`] if `points` is empty.
     pub fn from_points(points: &[DirectPosition]) -> Result<Self, Error> {
         if points.is_empty() {
-            return Err(Error::EmptyCollection("points"));
+            return Err(Error::TooFewElements {
+                geometry: "Envelope::from_points",
+                minimum: 1,
+                spec: None,
+                id: None,
+                detail: None,
+            });
         }
 
         let first = &points[0];
@@ -226,6 +334,155 @@ impl Envelope {
         let upper_corner = DirectPosition::new(max_x, max_y, max_z)?;
 
         Ok(Self::new_unchecked(lower_corner, upper_corner))
+    }
+}
+
+impl Envelope {
+    /// Constructs a [`Solid`] whose boundary is the six faces of the bounding box.
+    ///
+    /// Each face is a [`Polygon`] with an outward-facing [`LinearRing`] exterior.
+    /// Faces are ordered: bottom (−z), top (+z), front (−y), back (+y), left (−x), right (+x).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotAVolume`] if the envelope does not have all three extents non-zero.
+    pub fn to_solid(&self) -> Result<Solid, Error> {
+        if !self.is_volume() {
+            return Err(Error::NotAVolume {
+                non_zero_extents: self.non_zero_extents(),
+            });
+        }
+
+        let (lx, ly, lz) = (
+            self.lower_corner.x(),
+            self.lower_corner.y(),
+            self.lower_corner.z(),
+        );
+        let (hx, hy, hz) = (
+            self.upper_corner.x(),
+            self.upper_corner.y(),
+            self.upper_corner.z(),
+        );
+
+        let p000 = DirectPosition::new(lx, ly, lz).expect("envelope corners are finite");
+        let p100 = DirectPosition::new(hx, ly, lz).expect("envelope corners are finite");
+        let p110 = DirectPosition::new(hx, hy, lz).expect("envelope corners are finite");
+        let p010 = DirectPosition::new(lx, hy, lz).expect("envelope corners are finite");
+        let p001 = DirectPosition::new(lx, ly, hz).expect("envelope corners are finite");
+        let p101 = DirectPosition::new(hx, ly, hz).expect("envelope corners are finite");
+        let p111 = DirectPosition::new(hx, hy, hz).expect("envelope corners are finite");
+        let p011 = DirectPosition::new(lx, hy, hz).expect("envelope corners are finite");
+
+        let face_rings: [Vec<DirectPosition>; 6] = [
+            vec![p000, p010, p110, p100], // bottom (−z)
+            vec![p001, p101, p111, p011], // top    (+z)
+            vec![p000, p100, p101, p001], // front  (−y)
+            vec![p010, p011, p111, p110], // back   (+y)
+            vec![p000, p001, p011, p010], // left   (−x)
+            vec![p100, p110, p111, p101], // right  (+x)
+        ];
+
+        let members: Vec<SurfaceProperty> = face_rings
+            .into_iter()
+            .map(|points| {
+                let ring = LinearRing::new(AbstractRing::default(), points).ok()?;
+                let polygon = Polygon::new(
+                    AbstractSurface::default(),
+                    Some(RingPropertyKind::LinearRing(ring)),
+                    vec![],
+                )
+                .ok()?;
+                Some(SurfaceProperty::new(SurfaceKind::Polygon(polygon)))
+            })
+            .collect::<Option<_>>()
+            .expect("envelope corners are finite and valid");
+
+        let solid = Solid::new(AbstractSolid::default(), members).expect("envelope is valid");
+        Ok(solid)
+    }
+
+    /// Constructs a [`Polygon`] from the flat rectangle of this envelope.
+    ///
+    /// The four corners are wound counter-clockwise when viewed from the
+    /// positive side of the collapsed axis (i.e. outward-facing normal).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotASurface`] if the envelope does not have exactly two non-zero extents.
+    pub fn to_polygon(&self) -> Result<Polygon, Error> {
+        if !self.is_surface() {
+            return Err(Error::NotASurface {
+                non_zero_extents: self.non_zero_extents(),
+            });
+        }
+
+        let (lx, ly, lz) = (
+            self.lower_corner.x(),
+            self.lower_corner.y(),
+            self.lower_corner.z(),
+        );
+        let (hx, hy, hz) = (
+            self.upper_corner.x(),
+            self.upper_corner.y(),
+            self.upper_corner.z(),
+        );
+
+        let points = if self.size_z() == 0.0 {
+            // XY plane — normal along +Z
+            vec![
+                DirectPosition::new(lx, ly, lz).expect("envelope corners are finite"),
+                DirectPosition::new(hx, ly, lz).expect("envelope corners are finite"),
+                DirectPosition::new(hx, hy, lz).expect("envelope corners are finite"),
+                DirectPosition::new(lx, hy, lz).expect("envelope corners are finite"),
+            ]
+        } else if self.size_y() == 0.0 {
+            // XZ plane — normal along +Y
+            vec![
+                DirectPosition::new(lx, ly, lz).expect("envelope corners are finite"),
+                DirectPosition::new(lx, ly, hz).expect("envelope corners are finite"),
+                DirectPosition::new(hx, ly, hz).expect("envelope corners are finite"),
+                DirectPosition::new(hx, ly, lz).expect("envelope corners are finite"),
+            ]
+        } else {
+            // YZ plane — normal along +X
+            vec![
+                DirectPosition::new(lx, ly, lz).expect("envelope corners are finite"),
+                DirectPosition::new(lx, hy, lz).expect("envelope corners are finite"),
+                DirectPosition::new(lx, hy, hz).expect("envelope corners are finite"),
+                DirectPosition::new(lx, ly, hz).expect("envelope corners are finite"),
+            ]
+        };
+
+        let ring = LinearRing::new(AbstractRing::default(), points)
+            .expect("envelope corners are finite and valid");
+        Polygon::new(
+            AbstractSurface::default(),
+            Some(RingPropertyKind::LinearRing(ring)),
+            vec![],
+        )
+        .map_err(|_| Error::NotASurface {
+            non_zero_extents: self.non_zero_extents(),
+        })
+    }
+
+    /// Triangulates the envelope into a [`TriangulatedSurface`].
+    ///
+    /// - For a surface envelope (`is_surface()`): triangulates the single rectangular face.
+    /// - For a volume envelope (`is_volume()`): triangulates all six bounding faces and merges them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotSurfaceOrVolume`] if the envelope is a point or line segment.
+    pub fn to_triangulated_surface(&self) -> Result<TriangulatedSurface, Error> {
+        if self.is_surface() {
+            self.to_polygon()?.triangulate()
+        } else if self.is_volume() {
+            self.to_solid()?.triangulate()
+        } else {
+            Err(Error::NotSurfaceOrVolume {
+                non_zero_extents: self.non_zero_extents(),
+            })
+        }
     }
 }
 
@@ -323,6 +580,147 @@ mod tests {
         let result = Envelope::from_envelopes(&[a, b]).unwrap();
 
         assert_eq!(result, env(1.0, 1.0, 1.0, 3.0, 3.0, 3.0));
+    }
+
+    #[test]
+    fn is_point_when_corners_equal() {
+        let e = env(1.0, 2.0, 3.0, 1.0, 2.0, 3.0);
+        assert!(e.is_point());
+        assert!(!e.is_linear());
+        assert!(!e.is_surface());
+        assert!(!e.is_volume());
+    }
+
+    #[test]
+    fn is_linear_along_x() {
+        let e = env(0.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+        assert!(!e.is_point());
+        assert!(e.is_linear());
+        assert!(!e.is_surface());
+        assert!(!e.is_volume());
+    }
+
+    #[test]
+    fn is_linear_along_y() {
+        let e = env(0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
+        assert!(e.is_linear());
+    }
+
+    #[test]
+    fn is_linear_along_z() {
+        let e = env(0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+        assert!(e.is_linear());
+    }
+
+    #[test]
+    fn is_surface_xy_plane() {
+        let e = env(0.0, 0.0, 0.0, 1.0, 1.0, 0.0);
+        assert!(!e.is_point());
+        assert!(!e.is_linear());
+        assert!(e.is_surface());
+        assert!(!e.is_volume());
+    }
+
+    #[test]
+    fn is_surface_xz_plane() {
+        let e = env(0.0, 0.0, 0.0, 1.0, 0.0, 1.0);
+        assert!(e.is_surface());
+    }
+
+    #[test]
+    fn is_surface_yz_plane() {
+        let e = env(0.0, 0.0, 0.0, 0.0, 1.0, 1.0);
+        assert!(e.is_surface());
+    }
+
+    #[test]
+    fn is_volume_all_extents_nonzero() {
+        let e = env(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
+        assert!(!e.is_point());
+        assert!(!e.is_linear());
+        assert!(!e.is_surface());
+        assert!(e.is_volume());
+    }
+
+    #[test]
+    fn to_polygon_returns_err_for_point() {
+        assert_eq!(
+            env(1.0, 1.0, 1.0, 1.0, 1.0, 1.0).to_polygon(),
+            Err(Error::NotASurface {
+                non_zero_extents: 0
+            })
+        );
+    }
+
+    #[test]
+    fn to_polygon_returns_err_for_linear() {
+        assert_eq!(
+            env(0.0, 0.0, 0.0, 1.0, 0.0, 0.0).to_polygon(),
+            Err(Error::NotASurface {
+                non_zero_extents: 1
+            })
+        );
+    }
+
+    #[test]
+    fn to_polygon_returns_err_for_volume() {
+        assert_eq!(
+            env(0.0, 0.0, 0.0, 1.0, 1.0, 1.0).to_polygon(),
+            Err(Error::NotASurface {
+                non_zero_extents: 3
+            })
+        );
+    }
+
+    #[test]
+    fn to_polygon_xy_plane() {
+        assert!(env(0.0, 0.0, 0.0, 2.0, 3.0, 0.0).to_polygon().is_ok());
+    }
+
+    #[test]
+    fn to_polygon_xz_plane() {
+        assert!(env(0.0, 0.0, 0.0, 2.0, 0.0, 3.0).to_polygon().is_ok());
+    }
+
+    #[test]
+    fn to_polygon_yz_plane() {
+        assert!(env(0.0, 0.0, 0.0, 0.0, 2.0, 3.0).to_polygon().is_ok());
+    }
+
+    #[test]
+    fn to_triangulated_surface_returns_err_for_point() {
+        assert_eq!(
+            env(0.0, 0.0, 0.0, 0.0, 0.0, 0.0).to_triangulated_surface(),
+            Err(Error::NotSurfaceOrVolume {
+                non_zero_extents: 0
+            })
+        );
+    }
+
+    #[test]
+    fn to_triangulated_surface_returns_err_for_linear() {
+        assert_eq!(
+            env(0.0, 0.0, 0.0, 1.0, 0.0, 0.0).to_triangulated_surface(),
+            Err(Error::NotSurfaceOrVolume {
+                non_zero_extents: 1
+            })
+        );
+    }
+
+    #[test]
+    fn to_triangulated_surface_surface_has_two_triangles() {
+        let result = env(0.0, 0.0, 0.0, 2.0, 3.0, 0.0)
+            .to_triangulated_surface()
+            .unwrap();
+        assert_eq!(result.triangles().len(), 2);
+    }
+
+    #[test]
+    fn to_triangulated_surface_volume_has_twelve_triangles() {
+        let result = env(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+            .to_triangulated_surface()
+            .unwrap();
+        assert_eq!(result.triangles().len(), 12);
     }
 
     #[test]

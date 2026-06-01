@@ -1,5 +1,4 @@
-use crate::Error::IdenticalPositions;
-use crate::error::Error;
+use crate::Error;
 use crate::model::geometry::primitives::{
     AbstractSurfacePatch, AsAbstractSurfacePatch, AsAbstractSurfacePatchMut, TriangulatedSurface,
 };
@@ -21,8 +20,23 @@ pub struct Triangle {
 
 impl Triangle {
     pub fn new(a: DirectPosition, b: DirectPosition, c: DirectPosition) -> Result<Self, Error> {
-        if a == b || a == c || b == c {
-            return Err(IdenticalPositions);
+        if a == b {
+            return Err(Error::IdenticalPositions {
+                first: a,
+                second: b,
+            });
+        }
+        if a == c {
+            return Err(Error::IdenticalPositions {
+                first: a,
+                second: c,
+            });
+        }
+        if b == c {
+            return Err(Error::IdenticalPositions {
+                first: b,
+                second: c,
+            });
         }
 
         Ok(Self {
@@ -104,7 +118,10 @@ mod tests {
             DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
         );
 
-        assert!(matches!(triangle_result, Err(Error::IdenticalPositions)));
+        assert!(matches!(
+            triangle_result,
+            Err(Error::IdenticalPositions { .. })
+        ));
     }
 
     #[test]
@@ -133,6 +150,9 @@ mod tests {
                 .unwrap(),
         );
 
-        assert!(matches!(triangle_result, Err(Error::IdenticalPositions)));
+        assert!(matches!(
+            triangle_result,
+            Err(Error::IdenticalPositions { .. })
+        ));
     }
 }

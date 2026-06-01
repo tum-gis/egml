@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 /// A stable, globally unique identifier for a GML object.
 ///
-/// Corresponds to the `gml:id` XML attribute (ISO 19136 §7.2.2).
+/// Corresponds to the `gml:id` XML attribute ([OGC 07-036 §7.2.4.5](https://docs.ogc.org/is/07-036/07-036.pdf)).
 /// An `Id` is a non-empty string; it can be constructed from arbitrary
 /// bytes or strings by hashing them with SHA-256, or generated as a
 /// random UUID v4.
@@ -94,10 +94,16 @@ impl TryFrom<&String> for Id {
 
     /// # Errors
     ///
-    /// Returns [`Error::EmptyCollection`] if the string is empty.
+    /// Returns [`Error::TooFewElements`] if the string is empty.
     fn try_from(item: &String) -> Result<Self, Self::Error> {
         if item.is_empty() {
-            Err(Error::EmptyCollection("id"))
+            Err(Error::TooFewElements {
+                geometry: "gml:id",
+                minimum: 1,
+                spec: None,
+                id: None,
+                detail: Some("id string must not be empty".to_string()),
+            })
         } else {
             Ok(Self(item.to_string()))
         }
@@ -109,10 +115,16 @@ impl TryFrom<&str> for Id {
 
     /// # Errors
     ///
-    /// Returns [`Error::EmptyCollection`] if the string slice is empty.
+    /// Returns [`Error::TooFewElements`] if the string slice is empty.
     fn try_from(item: &str) -> Result<Self, Self::Error> {
         if item.is_empty() {
-            Err(Error::EmptyCollection("id"))
+            Err(Error::TooFewElements {
+                geometry: "gml:id",
+                minimum: 1,
+                spec: None,
+                id: None,
+                detail: Some("id string must not be empty".to_string()),
+            })
         } else {
             Ok(Self(item.to_string()))
         }
@@ -124,10 +136,16 @@ impl TryFrom<String> for Id {
 
     /// # Errors
     ///
-    /// Returns [`Error::EmptyCollection`] if the owned string is empty.
+    /// Returns [`Error::TooFewElements`] if the owned string is empty.
     fn try_from(item: String) -> Result<Self, Self::Error> {
         if item.is_empty() {
-            Err(Error::EmptyCollection("id"))
+            Err(Error::TooFewElements {
+                geometry: "gml:id",
+                minimum: 1,
+                spec: None,
+                id: None,
+                detail: Some("id string must not be empty".to_string()),
+            })
         } else {
             Ok(Self(item))
         }
@@ -149,13 +167,19 @@ impl fmt::Display for Id {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Error::EmptyCollection;
 
     #[test]
     fn id_from_empty_string() {
         let result = Id::try_from("".to_string());
 
-        assert_eq!(result, Err(EmptyCollection("id")));
+        assert!(matches!(
+            result,
+            Err(Error::TooFewElements {
+                geometry: "gml:id",
+                minimum: 1,
+                ..
+            })
+        ));
     }
 
     #[test]

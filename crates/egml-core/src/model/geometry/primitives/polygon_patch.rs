@@ -12,7 +12,7 @@ use nalgebra::Isometry3;
 ///
 /// `PolygonPatch` has the same geometry as [`Polygon`](crate::model::geometry::primitives::Polygon)
 /// but is used exclusively as a building block of a patched surface rather than
-/// as a standalone geometry element.  Corresponds to `gml:PolygonPatch` in ISO 19136 §10.5.8.
+/// as a standalone geometry element.  Corresponds to `gml:PolygonPatch` in [OGC 07-036 §10.5.12.4](https://docs.ogc.org/is/07-036/07-036.pdf).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PolygonPatch {
     pub(crate) abstract_surface_patch: AbstractSurfacePatch,

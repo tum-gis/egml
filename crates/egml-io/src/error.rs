@@ -2,10 +2,11 @@ use thiserror::Error;
 
 /// Errors returned by `egml-io` parsing operations.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// Wraps a core geometry validation error.
     #[error(transparent)]
-    Core(#[from] egml_core::Error),
+    EgmlError(#[from] egml_core::Error),
 
     /// Wraps a low-level XML syntax error from `quick-xml`.
     #[error(transparent)]
@@ -26,12 +27,21 @@ pub enum Error {
     #[error("required GML element '{0}' was not found in the XML input")]
     ElementNotFound(String),
 
-    /// The GML input contains 2-D coordinates (`srsDimension=\"2\"`), but only
-    /// 3-D geometries (`srsDimension=\"3\"`) are supported by this parser.
+    /// The GML input uses a coordinate dimension other than 3.
+    ///
+    /// `found` is the `srsDimension` value from the input; only 3-D geometries
+    /// (`srsDimension="3"`) are supported.
+    #[error("only 3-D coordinates (srsDimension=\"3\") are supported; found srsDimension={found}")]
+    UnsupportedDimension { found: u32 },
+
+    /// A `gml:posList` contains a number of values that is not a multiple of 3.
+    ///
+    /// `count` is the actual number of values encountered.
     #[error(
-        "only 3-D coordinates (srsDimension=\"3\") are supported; 2-D GML input is not accepted"
+        "coordinate list has {count} value(s), which is not a multiple of 3; \
+         3-D coordinates require groups of exactly 3 values (x, y, z)"
     )]
-    UnsupportedDimension(),
+    InvalidCoordinateCount { count: usize },
 
     /// One or more required child elements are absent from the GML fragment.
     ///
@@ -41,16 +51,16 @@ pub enum Error {
     MissingElements(String),
 
     /// A `gml:LinearRing` element was expected but not found.
-    #[error("missing linear ring")]
-    MissingLinearRing(),
+    #[error("missing gml:LinearRing element")]
+    MissingLinearRing,
 
     /// A surface kind discriminator was expected but not found.
     ///
     /// The inner string names the parent element.
-    #[error("missing surface kind for `{0}`")]
+    #[error("missing surface kind for '{0}'")]
     MissingSurfaceKind(String),
 
     /// The GML input uses XLink references (`xlink:href`), which are not yet resolved.
     #[error("XLinks are not supported yet")]
-    UnsupportedXLink(),
+    UnsupportedXLink,
 }

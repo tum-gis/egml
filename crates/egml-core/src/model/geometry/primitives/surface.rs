@@ -8,7 +8,7 @@ use nalgebra::Isometry3;
 
 /// A 2-D geometry composed of one or more surface patches.
 ///
-/// Corresponds to `gml:Surface` in ISO 19136 §10.5.3.  Patches are stored as
+/// Corresponds to `gml:Surface` in [OGC 07-036 §10.5.10](https://docs.ogc.org/is/07-036/07-036.pdf).  Patches are stored as
 /// a [`SurfacePatchArrayProperty`] and may be of mixed kinds (polygons, triangles).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Surface {

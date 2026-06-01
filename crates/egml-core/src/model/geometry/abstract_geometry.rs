@@ -1,6 +1,6 @@
 use crate::model::base::{AbstractGml, AsAbstractGml, AsAbstractGmlMut};
 
-/// Base data shared by all GML geometry types (ISO 19136 §10.1.3.1).
+/// Base data shared by all GML geometry types ([OGC 07-036 §10.1.3.1](https://docs.ogc.org/is/07-036/07-036.pdf)).
 ///
 /// Embeds [`AbstractGml`] and is in turn embedded by every concrete and
 /// abstract geometry.

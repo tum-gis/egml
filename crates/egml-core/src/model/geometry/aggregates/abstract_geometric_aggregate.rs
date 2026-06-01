@@ -1,6 +1,6 @@
 use crate::model::geometry::{AbstractGeometry, AsAbstractGeometry, AsAbstractGeometryMut};
 
-/// Base data shared by all GML multi-geometry aggregate types (ISO 19136 §10.6).
+/// Base data shared by all GML multi-geometry aggregate types ([OGC 07-036 §11.3.1.1](https://docs.ogc.org/is/07-036/07-036.pdf)).
 ///
 /// An aggregate groups homogeneous geometry primitives without imposing
 /// topological constraints between them.

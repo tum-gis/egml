@@ -1,7 +1,4 @@
 use crate::error::Error;
-use crate::error::Error::TooFewElements;
-
-use crate::Error::{AdjacentDuplicatePositions, RepeatedClosingVertex};
 use crate::impl_abstract_ring_traits;
 use crate::model::base::{AsAbstractGml, Id};
 use crate::model::geometry::primitives::{AbstractRing, AsAbstractRing, AsAbstractRingMut};
@@ -12,7 +9,7 @@ const MINIMUM_NUMBER_OF_POINTS: usize = 3;
 
 /// An implicitly closed ring of at least 3 distinct, non-adjacent positions.
 ///
-/// Corresponds to `gml:LinearRing` in ISO 19136 §10.5.12.  The ring is
+/// Corresponds to `gml:LinearRing` in [OGC 07-036 §10.5.8](https://docs.ogc.org/is/07-036/07-036.pdf).  The ring is
 /// implicitly closed: the last position is not repeated.
 ///
 /// # Invariants
@@ -71,12 +68,14 @@ impl LinearRing {
     }
 
     fn validate_points(points: &[DirectPosition], id: Option<&Id>) -> Result<(), Error> {
-        let duplicates_count = points.windows(2).filter(|x| x[0] == x[1]).count();
-        if duplicates_count > 0 {
-            return Err(AdjacentDuplicatePositions);
+        if let Some((index, window)) = points.windows(2).enumerate().find(|(_, w)| w[0] == w[1]) {
+            return Err(Error::AdjacentDuplicatePositions {
+                index,
+                position: window[0],
+            });
         }
         if points.len() < MINIMUM_NUMBER_OF_POINTS {
-            let message = if id.is_none() {
+            let detail = if id.is_none() {
                 Some(format!(
                     "points: {}",
                     points
@@ -89,18 +88,17 @@ impl LinearRing {
                 None
             };
 
-            return Err(TooFewElements {
+            return Err(Error::TooFewElements {
                 geometry: "gml:LinearRing",
                 minimum: 3,
-                spec: Some("ISO 19136 §10.5.12"),
+                spec: Some("OGC 07-036 §10.5.8"),
                 id: id.cloned(),
-                message,
+                detail,
             });
         }
-        if points.first().expect("non-empty validated above")
-            == points.last().expect("non-empty validated above")
-        {
-            return Err(RepeatedClosingVertex);
+        let first = *points.first().expect("non-empty validated above");
+        if first == *points.last().expect("non-empty validated above") {
+            return Err(Error::RepeatedClosingVertex { position: first });
         }
         Ok(())
     }
@@ -138,7 +136,10 @@ mod test {
         ];
         let result = LinearRing::new(abstract_ring, points);
 
-        assert!(matches!(result, Err(Error::AdjacentDuplicatePositions)));
+        assert!(matches!(
+            result,
+            Err(Error::AdjacentDuplicatePositions { .. })
+        ));
     }
 
     #[test]

@@ -3,7 +3,7 @@ use crate::model::geometry::Envelope;
 use crate::model::geometry::primitives::{PolygonPatch, Triangle, TriangulatedSurface};
 use nalgebra::Isometry3;
 
-/// Base data shared by all GML surface-patch types (ISO 19136 §10.5.5).
+/// Base data shared by all GML surface-patch types ([OGC 07-036 §10.5.12.1](https://docs.ogc.org/is/07-036/07-036.pdf)).
 ///
 /// A surface patch is a sub-surface used as a building block inside a
 /// [`Surface`](crate::model::geometry::primitives::Surface).  Concrete

@@ -1,7 +1,7 @@
 use crate::model::base::AbstractGml;
-use crate::model::geometry::Envelope;
+use crate::model::feature::bounding_shape::BoundingShape;
 
-/// Base class for all GML features (ISO 19136 §9.3.1, `gml:AbstractFeatureType`).
+/// Base class for all GML features ([OGC 07-036 §9.3.1](https://docs.ogc.org/is/07-036/07-036.pdf), `gml:AbstractFeatureType`).
 ///
 /// Extends [`AbstractGml`] with an optional bounding envelope.  All concrete
 /// feature types defined in GML application schemas embed `AbstractFeature`.
@@ -9,8 +9,8 @@ use crate::model::geometry::Envelope;
 pub struct AbstractFeature {
     /// Base GML object data (id, name).
     pub abstract_gml: AbstractGml,
-    /// Optional precomputed bounding envelope.
-    pub bounded_by: Option<Envelope>,
+    /// Optional precomputed bounding shape.
+    pub bounded_by: Option<BoundingShape>,
 }
 
 impl AbstractFeature {

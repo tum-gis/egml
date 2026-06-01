@@ -1,6 +1,6 @@
 use crate::model::geometry::{AbstractGeometry, AsAbstractGeometry, AsAbstractGeometryMut};
 
-/// Base data shared by all GML geometry primitives (ISO 19136 §10.1.3.1).
+/// Base data shared by all GML geometry primitives ([OGC 07-036 §10.2.1](https://docs.ogc.org/is/07-036/07-036.pdf)).
 ///
 /// A geometry primitive is a connected, homogeneous geometric object.
 /// All concrete primitive types (Point, LineString, Surface, Solid) embed

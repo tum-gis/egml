@@ -16,7 +16,12 @@ pub struct GmlTriangulatedSurface {
     )]
     pub id: Option<String>,
 
-    #[serde(rename(serialize = "gml:patches", deserialize = "patches"))]
+    #[serde(
+        rename(serialize = "gml:patches", deserialize = "patches"),
+        // GML 3.1 used `trianglePatches`; GML 3.2 renamed this property to `patches`.
+        // Accept the old element for backwards-compatible deserialization.
+        alias = "trianglePatches"
+    )]
     pub patches: GmlSurfacePatchArrayProperty,
 }
 
@@ -122,6 +127,29 @@ mod tests {
         let triangulated_surface: TriangulatedSurface = parsed_gml.try_into().unwrap();
 
         assert_eq!(triangulated_surface.patches_len(), 3);
+    }
+
+    #[test]
+    fn deserialize_deprecated_triangulated_surface_with_three_triangles() {
+        let xml_document = b"
+        <gml:TriangulatedSurface srsDimension=\"3\">
+          <gml:trianglePatches>
+            <gml:Triangle>
+              <gml:exterior>
+                <gml:LinearRing>
+                  <gml:posList>-76.10530090332031 3.262645959854126 -0.023333795368671417 -76.19206237792969 3.5082428455352783 0.0 -77.13458251953125 3.1704795360565186 0.0 -76.10530090332031 3.262645959854126 -0.023333795368671417</gml:posList>
+                </gml:LinearRing>
+              </gml:exterior>
+            </gml:Triangle>
+          </gml:trianglePatches>
+        </gml:TriangulatedSurface>";
+
+        let parsed_result: Result<GmlTriangulatedSurface, DeError> =
+            de::from_reader(xml_document.as_ref());
+        let parsed_gml = parsed_result.expect("parsing should work");
+        let triangulated_surface: TriangulatedSurface = parsed_gml.try_into().unwrap();
+
+        assert_eq!(triangulated_surface.patches_len(), 1);
     }
 
     #[test]

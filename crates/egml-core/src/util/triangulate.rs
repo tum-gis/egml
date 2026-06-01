@@ -70,7 +70,12 @@ fn triangulate_without_holes(exterior: LinearRing) -> Result<TriangulatedSurface
     let mut earcut = earcut::Earcut::new();
     earcut.earcut(vertices_2d_buf.iter().copied(), &[], &mut triangle_indices);
     if triangle_indices.is_empty() {
-        return Err(Error::TriangulationFailed("earcut failed to triangulate"));
+        return Err(Error::TriangulationFailed {
+            context: format!(
+                "earcut produced no triangles for ring with {} vertices",
+                vertices_3d.len()
+            ),
+        });
     }
 
     let triangles: Vec<Triangle> = triangle_indices

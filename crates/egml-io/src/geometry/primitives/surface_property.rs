@@ -17,7 +17,7 @@ impl TryFrom<GmlSurfaceProperty> for SurfaceProperty {
 
     fn try_from(item: GmlSurfaceProperty) -> Result<Self, Self::Error> {
         if item.href.is_some() && item.content.is_none() {
-            return Err(Error::UnsupportedXLink());
+            return Err(Error::UnsupportedXLink);
         }
 
         let surface: SurfaceKind = item

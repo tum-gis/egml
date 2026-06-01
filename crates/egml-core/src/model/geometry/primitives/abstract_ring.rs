@@ -4,7 +4,7 @@ use crate::model::geometry::primitives::{
 use crate::model::geometry::{DirectPosition, Envelope};
 use nalgebra::Isometry3;
 
-/// Base data shared by all GML ring geometry types (ISO 19136 §10.5.3).
+/// Base data shared by all GML ring geometry types ([OGC 07-036 §10.5.6](https://docs.ogc.org/is/07-036/07-036.pdf)).
 ///
 /// A ring is a closed curve used as the boundary of a surface patch.
 /// The only concrete ring type currently implemented is [`LinearRing`].

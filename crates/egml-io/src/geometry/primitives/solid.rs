@@ -1,5 +1,4 @@
 use crate::error::Error;
-use crate::error::Error::MissingElements;
 use crate::primitives::shell_property::GmlShellProperty;
 use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
 use egml_core::model::geometry::primitives::{AbstractSolid, Solid, SurfaceProperty};
@@ -33,9 +32,9 @@ impl TryFrom<GmlSolid> for Solid {
 
         let surface_properties: Vec<SurfaceProperty> = value
             .exterior
-            .ok_or(MissingElements("".to_string()))?
+            .ok_or(Error::ElementNotFound("gml:exterior".to_string()))?
             .shell
-            .ok_or(MissingElements("".to_string()))?
+            .ok_or(Error::ElementNotFound("gml:Shell".to_string()))?
             .members
             .into_iter()
             .flat_map(|x| match x.try_into() {

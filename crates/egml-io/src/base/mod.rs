@@ -1,3 +1,3 @@
-mod gml_name;
+pub mod abstract_gml;
 
-pub use self::gml_name::*;
+pub use self::abstract_gml::*;

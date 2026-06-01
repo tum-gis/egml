@@ -9,7 +9,7 @@ use rayon::prelude::*;
 
 /// A 3-D geometry bounded by one or more surfaces.
 ///
-/// Corresponds to `gml:Solid` in ISO 19136 §10.6.  The bounding surfaces are
+/// Corresponds to `gml:Solid` in [OGC 07-036 §10.6.4](https://docs.ogc.org/is/07-036/07-036.pdf).  The bounding surfaces are
 /// stored as [`SurfaceProperty`] members and may be of any [`SurfaceKind`](crate::model::geometry::primitives::SurfaceKind).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Solid {
@@ -22,13 +22,19 @@ impl Solid {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::EmptyCollection`] if `members` is empty.
+    /// Returns [`Error::TooFewElements`] if `members` is empty.
     pub fn new(
         abstract_solid: AbstractSolid,
         members: Vec<SurfaceProperty>,
     ) -> Result<Self, Error> {
         if members.is_empty() {
-            return Err(Error::EmptyCollection("solid"));
+            return Err(Error::TooFewElements {
+                geometry: "gml:Solid",
+                minimum: 1,
+                spec: Some("OGC 07-036 §10.6.4"),
+                id: None,
+                detail: None,
+            });
         }
 
         Ok(Self {
@@ -46,10 +52,16 @@ impl Solid {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::EmptyCollection`] if `val` is empty.
+    /// Returns [`Error::TooFewElements`] if `val` is empty.
     pub fn set_members(&mut self, val: Vec<SurfaceProperty>) -> Result<(), Error> {
         if val.is_empty() {
-            return Err(Error::EmptyCollection("solid"));
+            return Err(Error::TooFewElements {
+                geometry: "gml:Solid",
+                minimum: 1,
+                spec: Some("OGC 07-036 §10.6.4"),
+                id: None,
+                detail: None,
+            });
         }
         self.members = val;
         Ok(())

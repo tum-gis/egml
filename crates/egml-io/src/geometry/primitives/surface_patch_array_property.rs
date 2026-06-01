@@ -16,8 +16,14 @@ impl TryFrom<GmlSurfacePatchArrayProperty> for SurfacePatchArrayProperty {
         let patches: Vec<SurfacePatchKind> = item
             .patches
             .into_iter()
-            .map(|p| p.try_into())
-            .collect::<Result<Vec<_>, _>>()?;
+            .filter_map(|p| match p.try_into() {
+                Ok(patch) => Some(patch),
+                Err(e) => {
+                    tracing::debug!("skipping invalid surface patch: {e}");
+                    None
+                }
+            })
+            .collect();
 
         Ok(Self::new(patches))
     }

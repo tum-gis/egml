@@ -32,11 +32,13 @@
 mod base;
 mod basic;
 mod error;
+mod feature;
 mod geometry;
 mod util;
 
 pub use crate::base::*;
 pub use crate::basic::*;
+pub use crate::feature::*;
 pub use crate::geometry::*;
 
 #[doc(inline)]

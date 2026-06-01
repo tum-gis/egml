@@ -1,4 +1,4 @@
-//! GML geometry model (ISO 19136 §10).
+//! GML geometry model ([OGC 07-036 §10](https://docs.ogc.org/is/07-036/07-036.pdf)).
 //!
 //! This module implements the GML 3.2 geometry type hierarchy in three
 //! sub-modules, plus two foundational types used throughout:

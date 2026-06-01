@@ -7,6 +7,10 @@
 
 mod code;
 mod measure;
+mod nil_reason;
+mod nil_reason_enumeration;
 
 pub use code::*;
 pub use measure::*;
+pub use nil_reason::*;
+pub use nil_reason_enumeration::*;

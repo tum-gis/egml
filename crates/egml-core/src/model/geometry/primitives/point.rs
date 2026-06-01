@@ -7,7 +7,7 @@ use nalgebra::Isometry3;
 
 /// A 0-D geometry that wraps a single [`DirectPosition`].
 ///
-/// Corresponds to `gml:Point` in ISO 19136 §10.3.1.
+/// Corresponds to `gml:Point` in [OGC 07-036 §10.3.1](https://docs.ogc.org/is/07-036/07-036.pdf).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Point {
     pub(crate) abstract_geometric_primitive: AbstractGeometricPrimitive,

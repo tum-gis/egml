@@ -5,7 +5,7 @@ use crate::model::geometry::primitives::{
 };
 use nalgebra::Isometry3;
 
-/// Base data shared by all GML curve geometry types (ISO 19136 §10.4.3).
+/// Base data shared by all GML curve geometry types ([OGC 07-036 §10.4.1](https://docs.ogc.org/is/07-036/07-036.pdf)).
 ///
 /// A curve is a 1-D geometric primitive representing a connected series of
 /// coordinate positions.  The only concrete curve type currently implemented

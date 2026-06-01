@@ -1,4 +1,3 @@
-use crate::Error::TooFewElements;
 use crate::model::geometry::aggregates::AggregationType;
 use crate::model::geometry::primitives::{
     AbstractSurface, AsAbstractSurface, AsAbstractSurfaceMut, SurfaceProperty, TriangulatedSurface,
@@ -11,7 +10,7 @@ use rayon::iter::ParallelIterator;
 
 /// A topology-aware surface composed of connected [`SurfaceProperty`] members.
 ///
-/// Corresponds to `gml:CompositeSurface` in ISO 19136 §10.7.6.  Unlike
+/// Corresponds to `gml:CompositeSurface` in [OGC 07-036 §11.2.2.3](https://docs.ogc.org/is/07-036/07-036.pdf).  Unlike
 /// [`MultiSurface`](crate::model::geometry::aggregates::MultiSurface), a
 /// `CompositeSurface` requires that its constituent surfaces share boundaries
 /// coherently, forming a single connected manifold.
@@ -34,12 +33,12 @@ impl CompositeSurface {
         aggregation_type: AggregationType,
     ) -> Result<Self, Error> {
         if surface_members.is_empty() {
-            return Err(TooFewElements {
+            return Err(Error::TooFewElements {
                 geometry: "gml:CompositeSurface",
                 minimum: 1,
-                spec: Some("ISO 19136 §10.5.14"),
+                spec: Some("OGC 07-036 §10.5.11.4"),
                 id: None,
-                message: None,
+                detail: None,
             });
         }
 
