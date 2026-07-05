@@ -1,10 +1,6 @@
-use crate::model::geometry::Envelope;
 use crate::model::geometry::primitives::{
     AbstractGeometricPrimitive, AsAbstractGeometricPrimitive, AsAbstractGeometricPrimitiveMut,
-    LineString,
 };
-use nalgebra::Isometry3;
-
 /// Base data shared by all GML curve geometry types ([OGC 07-036 §10.4.1](https://docs.ogc.org/is/07-036/07-036.pdf)).
 ///
 /// A curve is a 1-D geometric primitive representing a connected series of
@@ -74,42 +70,3 @@ macro_rules! impl_abstract_curve_traits {
 }
 
 impl_abstract_curve_traits!(AbstractCurve);
-
-/// Discriminated union of all concrete curve implementations.
-#[derive(Debug, Clone, PartialEq)]
-pub enum CurveKind {
-    /// A [`LineString`] curve.
-    LineString(LineString),
-}
-
-impl AsAbstractCurve for CurveKind {
-    fn abstract_curve(&self) -> &AbstractCurve {
-        match self {
-            Self::LineString(x) => x.abstract_curve(),
-        }
-    }
-}
-
-impl AsAbstractCurveMut for CurveKind {
-    fn abstract_curve_mut(&mut self) -> &mut AbstractCurve {
-        match self {
-            Self::LineString(x) => x.abstract_curve_mut(),
-        }
-    }
-}
-
-impl_abstract_curve_traits!(CurveKind);
-
-impl CurveKind {
-    pub fn compute_envelope(&self) -> Envelope {
-        match self {
-            Self::LineString(x) => x.compute_envelope(),
-        }
-    }
-
-    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
-        match self {
-            Self::LineString(x) => x.apply_transform(m),
-        }
-    }
-}

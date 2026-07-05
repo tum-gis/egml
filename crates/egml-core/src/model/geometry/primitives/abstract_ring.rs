@@ -1,9 +1,4 @@
-use crate::model::geometry::primitives::{
-    AbstractCurve, AsAbstractCurve, AsAbstractCurveMut, LinearRing,
-};
-use crate::model::geometry::{DirectPosition, Envelope};
-use nalgebra::Isometry3;
-
+use crate::model::geometry::primitives::{AbstractCurve, AsAbstractCurve, AsAbstractCurveMut};
 /// Base data shared by all GML ring geometry types ([OGC 07-036 §10.5.6](https://docs.ogc.org/is/07-036/07-036.pdf)).
 ///
 /// A ring is a closed curve used as the boundary of a surface patch.
@@ -68,48 +63,3 @@ macro_rules! impl_abstract_ring_traits {
 }
 
 impl_abstract_ring_traits!(AbstractRing);
-
-/// Discriminated union of all concrete ring implementations.
-#[derive(Debug, Clone, PartialEq)]
-pub enum RingKind {
-    /// A [`LinearRing`] ring.
-    LinearRing(LinearRing),
-}
-
-impl AsAbstractRing for RingKind {
-    fn abstract_ring(&self) -> &AbstractRing {
-        match self {
-            Self::LinearRing(x) => x.abstract_ring(),
-        }
-    }
-}
-
-impl AsAbstractRingMut for RingKind {
-    fn abstract_ring_mut(&mut self) -> &mut AbstractRing {
-        match self {
-            Self::LinearRing(x) => x.abstract_ring_mut(),
-        }
-    }
-}
-
-impl_abstract_ring_traits!(RingKind);
-
-impl RingKind {
-    pub fn compute_envelope(&self) -> Envelope {
-        match self {
-            Self::LinearRing(x) => x.compute_envelope(),
-        }
-    }
-
-    pub fn points(&self) -> &[DirectPosition] {
-        match self {
-            Self::LinearRing(x) => x.points(),
-        }
-    }
-
-    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
-        match self {
-            Self::LinearRing(x) => x.apply_transform(m),
-        }
-    }
-}

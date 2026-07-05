@@ -2,7 +2,7 @@ use crate::GmlDirectPosition;
 use crate::error::Error;
 use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut, Id};
 use egml_core::model::geometry::DirectPosition;
-use egml_core::model::geometry::primitives::{AbstractGeometricPrimitive, Point};
+use egml_core::model::geometry::primitives::Point;
 use quick_xml::{de, se};
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
@@ -23,16 +23,12 @@ impl TryFrom<GmlPoint> for Point {
     type Error = Error;
 
     fn try_from(item: GmlPoint) -> Result<Self, Self::Error> {
-        let mut abstract_geometric_primitive = AbstractGeometricPrimitive::default();
+        let mut point = Point::new(item.pos.try_into()?);
         if let Some(id) = item.id {
             let id: Id = id.try_into()?;
-            abstract_geometric_primitive.set_id(Some(id));
+            point.set_id(Some(id));
         }
-
-        Ok(Point::new(
-            abstract_geometric_primitive,
-            item.pos.try_into()?,
-        ))
+        Ok(point)
     }
 }
 
@@ -65,7 +61,7 @@ mod tests {
     use crate::primitives::{GmlPoint, deserialize_point, serialize_point};
     use egml_core::model::base::Id;
     use egml_core::model::geometry::DirectPosition;
-    use egml_core::model::geometry::primitives::{AbstractGeometricPrimitive, Point};
+    use egml_core::model::geometry::primitives::Point;
     use quick_xml::de;
 
     #[test]
@@ -109,7 +105,7 @@ mod tests {
 
     fn make_point(x: f64, y: f64, z: f64) -> Point {
         let pos = DirectPosition::new(x, y, z).unwrap();
-        Point::new(AbstractGeometricPrimitive::default(), pos)
+        Point::new(pos)
     }
 
     #[test]
@@ -135,11 +131,10 @@ mod tests {
 
     #[test]
     fn round_trip_point_with_id() {
-        let pos = DirectPosition::new(10.0, 20.0, 30.0).unwrap();
-        let mut prim = AbstractGeometricPrimitive::default();
         use egml_core::model::base::AsAbstractGmlMut;
-        prim.set_id(Some(Id::from_hashed_string("test-point")));
-        let original = Point::new(prim, pos);
+        let pos = DirectPosition::new(10.0, 20.0, 30.0).unwrap();
+        let mut original = Point::new(pos);
+        original.set_id(Some(Id::from_hashed_string("test-point")));
 
         let xml = serialize_point(&original).unwrap();
 

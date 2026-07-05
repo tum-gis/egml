@@ -34,7 +34,7 @@
 //!
 //! ```rust
 //! use egml_core::model::geometry::DirectPosition;
-//! use egml_core::model::geometry::primitives::{AbstractRing, LinearRing};
+//! use egml_core::model::geometry::primitives::LinearRing;
 //! use egml_core::model::geometry::Envelope;
 //!
 //! let pts = vec![
@@ -43,7 +43,7 @@
 //!     DirectPosition::new(1.0, 1.0, 0.0).unwrap(),
 //!     DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
 //! ];
-//! let ring = LinearRing::new(AbstractRing::default(), pts).unwrap();
+//! let ring = LinearRing::new(pts).unwrap();
 //! let envelope = Envelope::from_points(ring.points()).unwrap();
 //! assert!(envelope.size_x() > 0.0);
 //! ```

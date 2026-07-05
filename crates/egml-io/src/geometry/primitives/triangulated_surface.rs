@@ -2,7 +2,7 @@ use crate::Error;
 use crate::primitives::GmlSurfacePatchArrayProperty;
 use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
 use egml_core::model::geometry::primitives::{
-    AbstractSurface, AsSurface, Surface, SurfacePatchArrayProperty, TriangulatedSurface,
+    AsSurface, Surface, SurfacePatchArrayProperty, TriangulatedSurface,
 };
 use quick_xml::{DeError, de, se};
 use serde::{Deserialize, Serialize};
@@ -30,21 +30,21 @@ impl TryFrom<GmlTriangulatedSurface> for TriangulatedSurface {
 
     fn try_from(item: GmlTriangulatedSurface) -> Result<Self, Self::Error> {
         let id = item.id.map(|id| id.try_into()).transpose()?;
-        let mut abstract_surface = AbstractSurface::default();
-        abstract_surface.set_id(id);
 
         let patches: SurfacePatchArrayProperty = item.patches.try_into()?;
 
-        let surface = Surface::new(abstract_surface, patches);
-        Ok(Self::new(surface)?)
+        let surface = Surface::new(patches);
+        let mut ts = Self::new(surface)?;
+        ts.set_id(id);
+        Ok(ts)
     }
 }
 
 impl From<&TriangulatedSurface> for GmlTriangulatedSurface {
-    fn from(surface: &TriangulatedSurface) -> Self {
+    fn from(item: &TriangulatedSurface) -> Self {
         Self {
-            id: surface.id().map(|id| id.to_string()),
-            patches: GmlSurfacePatchArrayProperty::from(surface.patches()),
+            id: item.id().map(|id| id.to_string()),
+            patches: item.patches().into(),
         }
     }
 }

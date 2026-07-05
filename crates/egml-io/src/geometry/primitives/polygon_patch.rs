@@ -1,6 +1,6 @@
 use crate::Error;
-use crate::primitives::abstract_ring_property::GmlRingProperty;
-use egml_core::model::geometry::primitives::{PolygonPatch, RingPropertyKind};
+use crate::primitives::ring_property::GmlRingProperty;
+use egml_core::model::geometry::primitives::{PolygonPatch, RingProperty};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -20,35 +20,32 @@ impl TryFrom<GmlPolygonPatch> for PolygonPatch {
     type Error = Error;
 
     fn try_from(value: GmlPolygonPatch) -> Result<Self, Self::Error> {
-        let exterior: Option<RingPropertyKind> =
-            value.exterior.map(|x| x.try_into()).transpose()?;
+        let exterior: Option<RingProperty> = value.exterior.map(|x| x.try_into()).transpose()?;
 
-        let interior: Vec<RingPropertyKind> = value
+        let interior: Vec<RingProperty> = value
             .interior
             .into_iter()
             .map(|x| x.try_into())
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(PolygonPatch::new(Default::default(), exterior, interior))
+        Ok(PolygonPatch::new(exterior, interior))
     }
 }
 
 impl From<&PolygonPatch> for GmlPolygonPatch {
     fn from(patch: &PolygonPatch) -> Self {
-        let exterior = patch.exterior().map(ring_property_kind_to_gml);
-        let interior = patch
-            .interior()
-            .iter()
-            .map(ring_property_kind_to_gml)
-            .collect();
+        let exterior = patch.exterior().map(|x| x.into());
+        let interior = patch.interior().iter().map(|x| x.into()).collect();
         Self { exterior, interior }
     }
 }
 
-fn ring_property_kind_to_gml(kind: &RingPropertyKind) -> GmlRingProperty {
-    match kind {
-        RingPropertyKind::LinearRing(lr) => GmlRingProperty::from(lr),
-        RingPropertyKind::RingKind(_) => todo!("Ring serialization is not yet implemented"),
+impl From<&RingProperty> for GmlRingProperty {
+    fn from(item: &RingProperty) -> Self {
+        Self {
+            href: item.href.clone(),
+            object: item.object.as_ref().map(Into::into),
+        }
     }
 }
 
@@ -57,7 +54,7 @@ mod tests {
     use crate::primitives::GmlPolygonPatch;
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::{
-        AbstractRing, AbstractSurfacePatch, LinearRing, PolygonPatch, RingPropertyKind,
+        LinearRing, PolygonPatch, RingKind, RingProperty,
     };
     use quick_xml::{DeError, de, se};
 
@@ -76,9 +73,9 @@ mod tests {
         let parsed_gml = parsed_result.expect("parsing should work");
         let polygon_patch: PolygonPatch = parsed_gml.try_into().unwrap();
 
-        let exterior: &RingPropertyKind = polygon_patch.exterior().expect("should be set");
-        match exterior {
-            RingPropertyKind::LinearRing(x) => {
+        let exterior: &RingProperty = polygon_patch.exterior().expect("should be set");
+        match exterior.object.as_ref().expect("should be set") {
+            RingKind::LinearRing(x) => {
                 assert_eq!(x.points().len(), 3);
             }
             _ => panic!("should be linear ring"),
@@ -112,9 +109,9 @@ mod tests {
 
         assert_eq!(polygon_patch.interior().len(), 2);
 
-        let exterior: &RingPropertyKind = polygon_patch.exterior().expect("should be set");
-        match exterior {
-            RingPropertyKind::LinearRing(x) => {
+        let exterior: &RingProperty = polygon_patch.exterior().expect("should be set");
+        match exterior.object.as_ref().expect("should be set") {
+            RingKind::LinearRing(x) => {
                 assert_eq!(x.points().len(), 3);
             }
             _ => panic!("should be linear ring"),
@@ -127,12 +124,8 @@ mod tests {
             DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
-        let ring = LinearRing::new(AbstractRing::default(), points).unwrap();
-        PolygonPatch::new(
-            AbstractSurfacePatch::default(),
-            Some(RingPropertyKind::LinearRing(ring)),
-            vec![],
-        )
+        let ring_kind = RingKind::LinearRing(LinearRing::new(points).unwrap());
+        PolygonPatch::new(Some(RingProperty::new(ring_kind)), vec![])
     }
 
     #[test]

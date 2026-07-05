@@ -55,7 +55,9 @@ impl Triangle {
             c,
         }
     }
+}
 
+impl Triangle {
     pub fn distance_to_local_point(&self, p: &DirectPosition) -> f64 {
         let parry_triangle: parry3d_f64::shape::Triangle = self.clone().into();
         let point: parry3d_f64::math::Vector = (*p).into();

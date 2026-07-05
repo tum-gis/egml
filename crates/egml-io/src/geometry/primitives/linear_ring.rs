@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::geometry::direct_position_list::GmlDirectPositionList;
 use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
 use egml_core::model::geometry::DirectPosition;
-use egml_core::model::geometry::primitives::{AbstractRing, LinearRing};
+use egml_core::model::geometry::primitives::LinearRing;
 use quick_xml::se;
 use serde::{Deserialize, Serialize};
 
@@ -51,8 +51,6 @@ impl TryFrom<GmlLinearRing> for LinearRing {
 
     fn try_from(value: GmlLinearRing) -> Result<Self, Self::Error> {
         let id = value.id.map(|id| id.try_into()).transpose()?;
-        let mut abstract_ring = AbstractRing::default();
-        abstract_ring.set_id(id);
 
         let mut points: Vec<DirectPosition> = value
             .content
@@ -64,7 +62,8 @@ impl TryFrom<GmlLinearRing> for LinearRing {
             points.pop();
         }
 
-        let linear_ring = LinearRing::new(abstract_ring, points)?;
+        let mut linear_ring = LinearRing::new(points)?;
+        linear_ring.set_id(id);
         Ok(linear_ring)
     }
 }
@@ -104,7 +103,7 @@ mod tests {
     use crate::primitives::{GmlLinearRing, serialize_linear_ring};
     use egml_core::model::base::Id;
     use egml_core::model::geometry::DirectPosition;
-    use egml_core::model::geometry::primitives::{AbstractRing, LinearRing};
+    use egml_core::model::geometry::primitives::LinearRing;
     use quick_xml::de;
 
     fn make_triangle() -> LinearRing {
@@ -113,7 +112,7 @@ mod tests {
             DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
-        LinearRing::new(AbstractRing::default(), points).unwrap()
+        LinearRing::new(points).unwrap()
     }
 
     #[test]
@@ -192,9 +191,8 @@ mod tests {
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
             DirectPosition::new(0.0, 0.0, 1.0).unwrap(),
         ];
-        let mut abstract_ring = AbstractRing::default();
-        abstract_ring.set_id(Some(Id::from_hashed_string("test-ring")));
-        let ring = LinearRing::new(abstract_ring, points).unwrap();
+        let mut ring = LinearRing::new(points).unwrap();
+        ring.set_id(Some(Id::from_hashed_string("test-ring")));
 
         let xml = serialize_linear_ring(&ring).unwrap();
         assert!(xml.contains("id="));
@@ -223,7 +221,7 @@ mod tests {
             DirectPosition::new(678058.275, 5403817.484, 424.209).unwrap(),
             DirectPosition::new(678058.689, 5403816.628, 424.209).unwrap(),
         ];
-        let ring = LinearRing::new(AbstractRing::default(), points.clone()).unwrap();
+        let ring = LinearRing::new(points.clone()).unwrap();
 
         let xml = serialize_linear_ring(&ring).unwrap();
         let gml: GmlLinearRing = de::from_reader(xml.as_bytes()).unwrap();

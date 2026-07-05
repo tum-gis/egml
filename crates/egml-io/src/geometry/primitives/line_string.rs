@@ -2,7 +2,7 @@ use crate::geometry::direct_position_list::GmlDirectPositionList;
 use crate::{Error, GmlDirectPosition};
 use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
 use egml_core::model::geometry::DirectPosition;
-use egml_core::model::geometry::primitives::{AbstractCurve, LineString};
+use egml_core::model::geometry::primitives::LineString;
 use quick_xml::se;
 use serde::{Deserialize, Serialize};
 
@@ -50,16 +50,15 @@ impl TryFrom<GmlLineString> for LineString {
 
     fn try_from(value: GmlLineString) -> Result<Self, Self::Error> {
         let id = value.id.map(|id| id.try_into()).transpose()?;
-        let mut abstract_curve = AbstractCurve::default();
-        abstract_curve.set_id(id);
 
         let points: Vec<DirectPosition> = value
             .content
             .ok_or(Error::ElementNotFound("No element found".to_string()))?
             .try_into()?;
 
-        let linear_ring = LineString::new(abstract_curve, points)?;
-        Ok(linear_ring)
+        let mut line_string = LineString::new(points)?;
+        line_string.set_id(id);
+        Ok(line_string)
     }
 }
 
@@ -89,7 +88,7 @@ mod tests {
     use super::GmlLineString;
     use crate::primitives::line_string::serialize_line_string;
     use egml_core::model::geometry::DirectPosition;
-    use egml_core::model::geometry::primitives::{AbstractCurve, LineString};
+    use egml_core::model::geometry::primitives::LineString;
     use quick_xml::de;
 
     fn make_line_string() -> LineString {
@@ -98,7 +97,7 @@ mod tests {
             DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
             DirectPosition::new(2.0, 0.0, 0.0).unwrap(),
         ];
-        LineString::new(AbstractCurve::default(), points).unwrap()
+        LineString::new(points).unwrap()
     }
 
     #[test]
@@ -158,7 +157,7 @@ mod tests {
             DirectPosition::new(678058.275, 5403817.484, 424.209).unwrap(),
             DirectPosition::new(678058.689, 5403816.628, 424.209).unwrap(),
         ];
-        let line = LineString::new(AbstractCurve::default(), points.clone()).unwrap();
+        let line = LineString::new(points.clone()).unwrap();
 
         let xml = serialize_line_string(&line).unwrap();
         let gml: GmlLineString = de::from_reader(xml.as_bytes()).unwrap();

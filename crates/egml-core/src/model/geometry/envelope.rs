@@ -1,9 +1,10 @@
 use crate::error::Error;
 use crate::model::geometry::DirectPosition;
 use crate::model::geometry::primitives::{
-    AbstractRing, AbstractSolid, AbstractSurface, LinearRing, Polygon, RingPropertyKind, Solid,
-    SurfaceKind, SurfaceProperty, TriangulatedSurface,
+    LinearRing, Polygon, RingProperty, Solid, SurfaceProperty, TriangulatedSurface,
 };
+use crate::model::geometry::primitives::{RingKind, Shell};
+use crate::model::geometry::primitives::{ShellProperty, SurfaceKind};
 use nalgebra::{Isometry3, Point3, Vector3};
 use std::fmt;
 
@@ -109,6 +110,31 @@ impl Envelope {
     /// Returns the upper (maximum) corner.
     pub fn upper_corner(&self) -> &DirectPosition {
         &self.upper_corner
+    }
+
+    /// Returns the SRS name identifying the CRS of this envelope's coordinates,
+    /// or `None` if unspecified.
+    pub fn srs_name(&self) -> Option<&str> {
+        self.srs_name.as_deref()
+    }
+
+    /// Returns the coordinate dimension of this envelope's positions,
+    /// or `None` if unspecified.
+    pub fn srs_dimension(&self) -> Option<u8> {
+        self.srs_dimension
+    }
+
+    /// Sets the SRS (Spatial Reference System) name, identifying the CRS in which
+    /// this envelope's coordinates are expressed (e.g. `"urn:ogc:def:crs:EPSG::25832"`).
+    /// Pass `None` to leave the CRS unspecified.
+    pub fn set_srs_name(&mut self, srs_name: Option<String>) {
+        self.srs_name = srs_name;
+    }
+
+    /// Sets the coordinate dimension of this envelope's positions (typically `2` or `3`).
+    /// Pass `None` to leave the dimension implicit.
+    pub fn set_srs_dimension(&mut self, srs_dimension: Option<u8>) {
+        self.srs_dimension = srs_dimension;
     }
 
     /// Returns the diagonal vector from the lower corner to the upper corner.
@@ -385,19 +411,18 @@ impl Envelope {
         let members: Vec<SurfaceProperty> = face_rings
             .into_iter()
             .map(|points| {
-                let ring = LinearRing::new(AbstractRing::default(), points).ok()?;
-                let polygon = Polygon::new(
-                    AbstractSurface::default(),
-                    Some(RingPropertyKind::LinearRing(ring)),
-                    vec![],
-                )
-                .ok()?;
+                let ring = LinearRing::new(points).ok()?;
+                let polygon =
+                    Polygon::new(Some(RingProperty::new(RingKind::LinearRing(ring))), vec![])
+                        .ok()?;
                 Some(SurfaceProperty::new(SurfaceKind::Polygon(polygon)))
             })
             .collect::<Option<_>>()
             .expect("envelope corners are finite and valid");
+        let shell = Shell::new(members).expect("envelope is valid");
+        let shell_property = ShellProperty::new(shell);
 
-        let solid = Solid::new(AbstractSolid::default(), members).expect("envelope is valid");
+        let solid = Solid::new(Some(shell_property)).expect("envelope is valid");
         Ok(solid)
     }
 
@@ -453,15 +478,11 @@ impl Envelope {
             ]
         };
 
-        let ring = LinearRing::new(AbstractRing::default(), points)
-            .expect("envelope corners are finite and valid");
-        Polygon::new(
-            AbstractSurface::default(),
-            Some(RingPropertyKind::LinearRing(ring)),
-            vec![],
-        )
-        .map_err(|_| Error::NotASurface {
-            non_zero_extents: self.non_zero_extents(),
+        let ring = LinearRing::new(points).expect("envelope corners are finite and valid");
+        Polygon::new(Some(RingProperty::new(RingKind::LinearRing(ring))), vec![]).map_err(|_| {
+            Error::NotASurface {
+                non_zero_extents: self.non_zero_extents(),
+            }
         })
     }
 
@@ -477,7 +498,14 @@ impl Envelope {
         if self.is_surface() {
             self.to_polygon()?.triangulate()
         } else if self.is_volume() {
-            self.to_solid()?.triangulate()
+            self.to_solid()?
+                .exterior()
+                .as_ref()
+                .expect("must be created")
+                .object
+                .as_ref()
+                .expect("must be created")
+                .triangulate()
         } else {
             Err(Error::NotSurfaceOrVolume {
                 non_zero_extents: self.non_zero_extents(),

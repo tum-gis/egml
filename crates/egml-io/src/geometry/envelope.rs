@@ -9,9 +9,9 @@ pub struct GmlEnvelope {
     #[serde(rename(serialize = "gml:upperCorner", deserialize = "upperCorner"))]
     upper_corner: GmlDirectPosition,
 
-    #[serde(rename = "@srsName")]
+    #[serde(rename = "@srsName", skip_serializing_if = "Option::is_none")]
     srs_name: Option<String>,
-    #[serde(rename = "@srsDimension")]
+    #[serde(rename = "@srsDimension", skip_serializing_if = "Option::is_none")]
     srs_dimension: Option<u8>,
 }
 
@@ -28,7 +28,9 @@ impl TryFrom<GmlEnvelope> for Envelope {
         let lower_corner: DirectPosition = item.lower_corner.try_into()?;
         let upper_corner: DirectPosition = item.upper_corner.try_into()?;
 
-        let envelope = Envelope::new(lower_corner, upper_corner)?;
+        let mut envelope = Envelope::new(lower_corner, upper_corner)?;
+        envelope.set_srs_name(item.srs_name);
+        envelope.set_srs_dimension(item.srs_dimension);
         Ok(envelope)
     }
 }
@@ -38,8 +40,8 @@ impl From<&Envelope> for GmlEnvelope {
         Self {
             lower_corner: item.lower_corner().into(),
             upper_corner: item.upper_corner().into(),
-            srs_name: None,
-            srs_dimension: None,
+            srs_name: item.srs_name().map(ToOwned::to_owned),
+            srs_dimension: item.srs_dimension(),
         }
     }
 }

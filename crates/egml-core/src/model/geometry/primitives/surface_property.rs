@@ -1,32 +1,26 @@
-use crate::model::geometry::primitives::SurfaceKind;
-use crate::model::geometry::{DirectPosition, Envelope};
-use nalgebra::Isometry3;
+use crate::model::geometry::primitives::surface_kind::SurfaceKind;
 
 /// An owned wrapper around a concrete [`SurfaceKind`].
 ///
 /// Used as a property element in GML to hold an inline surface definition.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SurfaceProperty {
-    // pub href: Option<String>,
-    /// The surface value held by this property.
-    pub content: SurfaceKind,
+    pub object: Option<SurfaceKind>,
+    pub href: Option<String>,
 }
 
 impl SurfaceProperty {
-    /// Creates a new `SurfaceProperty` wrapping the given surface.
-    pub fn new(content: SurfaceKind) -> Self {
-        Self { content }
+    pub fn new(object: SurfaceKind) -> Self {
+        Self {
+            object: Some(object),
+            href: None,
+        }
     }
 
-    pub fn points(&self) -> Vec<&DirectPosition> {
-        self.content.points()
-    }
-
-    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
-        self.content.apply_transform(m);
-    }
-
-    pub fn compute_envelope(&self) -> Envelope {
-        self.content.compute_envelope()
+    pub fn new_href(href: impl Into<String>) -> Self {
+        Self {
+            object: None,
+            href: Some(href.into()),
+        }
     }
 }

@@ -54,4 +54,12 @@ impl Code {
     pub fn code_space(&self) -> Option<&str> {
         self.code_space.as_deref()
     }
+
+    pub fn set_value(&mut self, value: impl Into<String>) {
+        self.value = value.into();
+    }
+
+    pub fn set_code_space<S: Into<String>>(&mut self, code_space: Option<S>) {
+        self.code_space = code_space.map(Into::into);
+    }
 }

@@ -30,9 +30,11 @@ mod abstract_geometry;
 pub mod aggregates;
 pub mod complexes;
 mod direct_position;
+mod direct_position_list;
 mod envelope;
 pub mod primitives;
 
 pub use self::abstract_geometry::*;
 pub use self::direct_position::*;
+pub use self::direct_position_list::*;
 pub use self::envelope::*;

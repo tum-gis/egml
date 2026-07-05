@@ -1,8 +1,9 @@
 use crate::error::Error;
-use crate::primitives::{GmlSurfaceKind, GmlSurfaceProperty};
+use crate::primitives::GmlSurfaceProperty;
 use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
-use egml_core::model::geometry::aggregates::{AbstractGeometricAggregate, MultiSurface};
-use egml_core::model::geometry::primitives::SurfaceKind;
+use egml_core::model::geometry::aggregates::MultiSurface;
+use egml_core::model::geometry::primitives::SurfaceProperty;
+use egml_core::model::geometry::{AsAbstractGeometry, AsAbstractGeometryMut};
 use quick_xml::{DeError, de, se};
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
@@ -15,6 +16,9 @@ pub struct GmlMultiSurface {
     )]
     id: Option<String>,
 
+    #[serde(rename = "@srsDimension", skip_serializing_if = "Option::is_none")]
+    srs_dimension: Option<u32>,
+
     #[serde(
         rename(serialize = "gml:surfaceMember", deserialize = "surfaceMember"),
         default
@@ -26,18 +30,17 @@ impl TryFrom<GmlMultiSurface> for MultiSurface {
     type Error = Error;
 
     fn try_from(item: GmlMultiSurface) -> Result<Self, Self::Error> {
-        let mut abstract_aggregate = AbstractGeometricAggregate::default();
         let id = item.id.map(|id| id.try_into()).transpose()?;
-        abstract_aggregate.set_id(id);
 
-        let surface_members: Vec<SurfaceKind> = item
+        let surface_members: Vec<SurfaceProperty> = item
             .members
             .into_iter()
-            .flat_map(|x| x.content)
             .map(|x| x.try_into())
-            .collect::<Result<Vec<SurfaceKind>, Error>>()?;
+            .collect::<Result<Vec<SurfaceProperty>, Error>>()?;
 
-        let multi_surface = MultiSurface::new(abstract_aggregate, surface_members)?;
+        let mut multi_surface = MultiSurface::new(surface_members)?;
+        multi_surface.set_id(id);
+        multi_surface.set_srs_dimension(item.srs_dimension);
         Ok(multi_surface)
     }
 }
@@ -46,13 +49,11 @@ impl From<&MultiSurface> for GmlMultiSurface {
     fn from(multi_surface: &MultiSurface) -> Self {
         Self {
             id: multi_surface.id().map(|id| id.to_string()),
+            srs_dimension: multi_surface.srs_dimension(),
             members: multi_surface
                 .surface_member()
                 .iter()
-                .map(|kind| GmlSurfaceProperty {
-                    href: None,
-                    content: Some(GmlSurfaceKind::from(kind)),
-                })
+                .map(|x| x.into())
                 .collect(),
         }
     }
@@ -78,10 +79,11 @@ mod tests {
     use super::GmlMultiSurface;
     use crate::aggregates::multi_surface::{deserialize_multi_surface, serialize_multi_surface};
     use egml_core::model::geometry::DirectPosition;
-    use egml_core::model::geometry::aggregates::{AbstractGeometricAggregate, MultiSurface};
+    use egml_core::model::geometry::aggregates::MultiSurface;
     use egml_core::model::geometry::primitives::{
-        AbstractRing, AbstractSurface, LinearRing, Polygon, RingPropertyKind, SurfaceKind,
+        LinearRing, Polygon, RingKind, RingProperty, SurfaceProperty,
     };
+    use egml_core::model::geometry::primitives::{LinearRingProperty, SurfaceKind};
     use quick_xml::de;
 
     fn make_multi_surface() -> MultiSurface {
@@ -90,18 +92,9 @@ mod tests {
             DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
-        let ring = LinearRing::new(AbstractRing::default(), points).unwrap();
-        let polygon = Polygon::new(
-            AbstractSurface::default(),
-            Some(RingPropertyKind::LinearRing(ring)),
-            vec![],
-        )
-        .unwrap();
-        MultiSurface::new(
-            AbstractGeometricAggregate::default(),
-            vec![SurfaceKind::Polygon(polygon)],
-        )
-        .unwrap()
+        let ring_kind = RingKind::LinearRing(LinearRing::new(points).unwrap());
+        let polygon = Polygon::new(Some(RingProperty::new(ring_kind)), []).unwrap();
+        MultiSurface::new([SurfaceProperty::new(SurfaceKind::Polygon(polygon))]).unwrap()
     }
 
     #[test]

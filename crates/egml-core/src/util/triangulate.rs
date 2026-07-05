@@ -1,7 +1,7 @@
 use crate::Error;
 use crate::model::geometry::DirectPosition;
 use crate::model::geometry::primitives::{
-    LinearRing, RingPropertyKind, Triangle, TriangulatedSurface,
+    LinearRing, RingKind, RingProperty, Triangle, TriangulatedSurface,
 };
 
 /// Triangulates a polygon defined by an exterior ring and optional interior (hole) rings.
@@ -19,8 +19,8 @@ use crate::model::geometry::primitives::{
 /// Currently panics (via `todo!`) if `exterior` is `None` or if non-`LinearRing`
 /// ring kinds are supplied.  These cases are not yet implemented.
 pub fn triangulate(
-    exterior: Option<RingPropertyKind>,
-    interior: Vec<RingPropertyKind>,
+    exterior: Option<RingProperty>,
+    interior: Vec<RingProperty>,
 ) -> Result<TriangulatedSurface, Error> {
     let exterior = match exterior {
         Some(ring) => ring,
@@ -28,16 +28,26 @@ pub fn triangulate(
             todo!("triangulate polygon with no exterior ring needs to be implemented")
         }
     };
-    let exterior = match exterior {
-        RingPropertyKind::LinearRing(x) => x,
+
+    let exterior = match exterior
+        .object
+        .expect("triangulate: exterior ring is not None")
+    {
+        RingKind::LinearRing(x) => x,
         _ => todo!("triangulate polygon with non-linear exterior ring needs to be implemented"),
     };
 
     let interior = interior
         .iter()
-        .map(|x| match x {
-            RingPropertyKind::LinearRing(x) => x.clone(),
-            _ => todo!("needs to be implemented"),
+        .map(|x| {
+            match x
+                .object
+                .as_ref()
+                .expect("triangulate: exterior ring is not None")
+            {
+                RingKind::LinearRing(x) => x.clone(),
+                _ => todo!("needs to be implemented"),
+            }
         })
         .collect::<Vec<_>>();
 
@@ -146,42 +156,35 @@ fn triangulate_with_holes(
 mod test {
     use super::*;
     use crate::model::base::{AbstractGml, Id};
-    use crate::model::geometry::primitives::{AbstractRing, AsAbstractSurfacePatch, AsSurface};
+    use crate::model::geometry::primitives::{AsAbstractSurfacePatch, AsSurface};
     use nalgebra::{Isometry3, Vector3};
 
     #[test]
     fn triangulate_test() {
-        let linear_ring = LinearRing::new(
-            AbstractRing::default(),
-            vec![
-                DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
-                DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
-                DirectPosition::new(1.0, 1.0, 0.0).unwrap(),
-                DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
-            ],
-        )
+        let linear_ring = LinearRing::new([
+            DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 1.0, 0.0).unwrap(),
+            DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
+        ])
         .unwrap();
 
         let result = triangulate_without_holes(linear_ring).unwrap();
 
         assert_eq!(result.patches_len(), 2);
-        assert!(result.patches().patches()[0].area() > 0.0);
-        assert!(result.patches().patches()[1].area() > 0.0);
+        assert!(result.patches().patches()[0].area_3d().unwrap() > 0.0);
+        assert!(result.patches().patches()[1].area_3d().unwrap() > 0.0);
     }
 
     #[test]
     fn linear_ring_test() {
-        let linear_ring = LinearRing::new(
-            AbstractRing::default(),
-            vec![
-                DirectPosition::new(478.88403143223741, 1137.6732953797839, 3.813234192323872)
-                    .unwrap(),
-                DirectPosition::new(478.88403145332472, 1137.6732953253052, 3.8132341922655204)
-                    .unwrap(),
-                DirectPosition::new(478.88403144458238, 1137.6732953478909, 3.8132341922897117)
-                    .unwrap(),
-            ],
-        )
+        let linear_ring = LinearRing::new([
+            DirectPosition::new(478.88403143223741, 1137.6732953797839, 3.813234192323872).unwrap(),
+            DirectPosition::new(478.88403145332472, 1137.6732953253052, 3.8132341922655204)
+                .unwrap(),
+            DirectPosition::new(478.88403144458238, 1137.6732953478909, 3.8132341922897117)
+                .unwrap(),
+        ])
         .unwrap();
 
         let result = triangulate_without_holes(linear_ring).unwrap();

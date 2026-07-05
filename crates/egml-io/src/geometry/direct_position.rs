@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct GmlDirectPosition {
-    #[serde(rename = "@srsDimension")]
+    #[serde(rename = "@srsDimension", skip_serializing_if = "Option::is_none")]
     pub(crate) srs_dimension: Option<u32>,
 
     #[serde(

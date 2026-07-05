@@ -23,9 +23,18 @@ impl TryFrom<GmlRingKind> for RingKind {
     }
 }
 
+impl From<&RingKind> for GmlRingKind {
+    fn from(item: &RingKind) -> Self {
+        match item {
+            RingKind::LinearRing(x) => GmlRingKind::LinearRing(x.into()),
+            RingKind::RingKind(_) => todo!("Ring serialization is not yet implemented"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::primitives::abstract_ring::GmlRingKind;
+    use crate::primitives::ring_kind::GmlRingKind;
     use egml_core::model::geometry::primitives::RingKind;
     use quick_xml::{DeError, de};
 

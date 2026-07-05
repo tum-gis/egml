@@ -17,14 +17,20 @@ pub struct Surface {
 }
 
 impl Surface {
-    /// Creates a new `Surface` from its abstract base and patch array.
-    pub fn new(abstract_surface: AbstractSurface, patches: SurfacePatchArrayProperty) -> Self {
+    /// Creates a new `Surface` from a patch array.
+    pub fn new(patches: SurfacePatchArrayProperty) -> Self {
         Surface {
-            abstract_surface,
+            abstract_surface: AbstractSurface::default(),
             patches,
         }
     }
 
+    pub fn patches(&self) -> &SurfacePatchArrayProperty {
+        &self.patches
+    }
+}
+
+impl Surface {
     pub(crate) fn into_patches(self) -> SurfacePatchArrayProperty {
         self.patches
     }
@@ -41,8 +47,12 @@ impl Surface {
     }
 
     /// Returns the union of the bounding boxes of all patches.
-    pub fn compute_envelope(&self) -> Envelope {
+    pub fn compute_envelope(&self) -> Option<Envelope> {
         self.patches.compute_envelope()
+    }
+
+    pub fn area_3d(&self) -> Result<f64, Error> {
+        self.patches.area_3d()
     }
 
     pub fn apply_transform(&mut self, m: &Isometry3<f64>) {

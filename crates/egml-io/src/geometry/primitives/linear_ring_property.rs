@@ -1,20 +1,27 @@
 use crate::primitives::GmlLinearRing;
-use egml_core::model::geometry::primitives::LinearRing;
+use egml_core::model::geometry::primitives::LinearRingProperty;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct GmlLinearRingProperty {
     #[serde(
+        rename(serialize = "@xlink:href", deserialize = "@href"),
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub href: Option<String>,
+
+    #[serde(
         rename(serialize = "gml:LinearRing", deserialize = "LinearRing"),
         skip_serializing_if = "Option::is_none"
     )]
-    pub linear_ring: Option<GmlLinearRing>,
+    pub object: Option<GmlLinearRing>,
 }
 
-impl From<&LinearRing> for GmlLinearRingProperty {
-    fn from(ring: &LinearRing) -> Self {
+impl From<&LinearRingProperty> for GmlLinearRingProperty {
+    fn from(item: &LinearRingProperty) -> Self {
         Self {
-            linear_ring: Some(GmlLinearRing::from(ring)),
+            href: item.href.clone(),
+            object: item.object.as_ref().map(|x| x.into()),
         }
     }
 }
@@ -23,7 +30,7 @@ impl From<&LinearRing> for GmlLinearRingProperty {
 mod tests {
     use super::GmlLinearRingProperty;
     use egml_core::model::geometry::DirectPosition;
-    use egml_core::model::geometry::primitives::{AbstractRing, LinearRing};
+    use egml_core::model::geometry::primitives::{LinearRing, LinearRingProperty};
     use quick_xml::{de, se};
 
     fn make_ring() -> LinearRing {
@@ -32,13 +39,14 @@ mod tests {
             DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
-        LinearRing::new(AbstractRing::default(), points).unwrap()
+        LinearRing::new(points).unwrap()
     }
 
     #[test]
     fn serialize_linear_ring_property_writes_gml_linear_ring_element() {
         let ring = make_ring();
-        let prop = GmlLinearRingProperty::from(&ring);
+        let ring_property = LinearRingProperty::new(ring);
+        let prop = GmlLinearRingProperty::from(&ring_property);
         let xml = se::to_string_with_root("gml:exterior", &prop).unwrap();
 
         assert!(xml.contains("<gml:LinearRing"));

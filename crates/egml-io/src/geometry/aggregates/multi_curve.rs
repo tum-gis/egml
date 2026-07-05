@@ -1,8 +1,9 @@
 use crate::Error;
 use crate::primitives::GmlCurveProperty;
 use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
-use egml_core::model::geometry::aggregates::{AbstractGeometricAggregate, MultiCurve};
-use egml_core::model::geometry::primitives::CurveKind;
+use egml_core::model::geometry::aggregates::MultiCurve;
+use egml_core::model::geometry::primitives::CurveProperty;
+use egml_core::model::geometry::{AsAbstractGeometry, AsAbstractGeometryMut};
 use quick_xml::{DeError, de, se};
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
@@ -14,6 +15,9 @@ pub struct GmlMultiCurve {
         skip_serializing_if = "Option::is_none"
     )]
     id: Option<String>,
+
+    #[serde(rename = "@srsDimension", skip_serializing_if = "Option::is_none")]
+    srs_dimension: Option<u32>,
 
     #[serde(
         rename(serialize = "gml:curveMember", deserialize = "curveMember"),
@@ -27,26 +31,25 @@ impl TryFrom<GmlMultiCurve> for MultiCurve {
 
     fn try_from(item: GmlMultiCurve) -> Result<Self, Self::Error> {
         let id = item.id.map(|id| id.try_into()).transpose()?;
-        let curve_members: Vec<CurveKind> = item
+        let curve_members: Vec<CurveProperty> = item
             .members
             .into_iter()
-            .flat_map(|x| x.content)
             .map(|x| x.try_into())
-            .collect::<Result<Vec<CurveKind>, Error>>()?;
+            .collect::<Result<Vec<CurveProperty>, Error>>()?;
 
-        let mut abstract_aggregate = AbstractGeometricAggregate::default();
-        abstract_aggregate.set_id(id);
-
-        let multi_curve = MultiCurve::new(abstract_aggregate, curve_members)?;
+        let mut multi_curve = MultiCurve::new(curve_members)?;
+        multi_curve.set_id(id);
+        multi_curve.set_srs_dimension(item.srs_dimension);
         Ok(multi_curve)
     }
 }
 
 impl From<&MultiCurve> for GmlMultiCurve {
-    fn from(multi_curve: &MultiCurve) -> Self {
+    fn from(item: &MultiCurve) -> Self {
         Self {
-            id: multi_curve.id().map(|id| id.to_string()),
-            members: multi_curve
+            id: item.id().map(|id| id.to_string()),
+            srs_dimension: item.srs_dimension(),
+            members: item
                 .curve_member()
                 .iter()
                 .map(GmlCurveProperty::from)
@@ -75,8 +78,9 @@ mod tests {
     use super::GmlMultiCurve;
     use crate::aggregates::multi_curve::{deserialize_multi_curve, serialize_multi_curve};
     use egml_core::model::geometry::DirectPosition;
-    use egml_core::model::geometry::aggregates::{AbstractGeometricAggregate, MultiCurve};
-    use egml_core::model::geometry::primitives::{AbstractCurve, CurveKind, LineString};
+    use egml_core::model::geometry::aggregates::MultiCurve;
+    use egml_core::model::geometry::primitives::LineString;
+    use egml_core::model::geometry::primitives::{CurveKind, CurveProperty};
     use quick_xml::de;
 
     fn make_multi_curve() -> MultiCurve {
@@ -85,12 +89,8 @@ mod tests {
             DirectPosition::new(1.0, 1.0, 1.0).unwrap(),
             DirectPosition::new(2.0, 2.0, 2.0).unwrap(),
         ];
-        let line_string = LineString::new(AbstractCurve::default(), points).unwrap();
-        MultiCurve::new(
-            AbstractGeometricAggregate::default(),
-            vec![CurveKind::LineString(line_string)],
-        )
-        .unwrap()
+        let curve_kind = CurveKind::LineString(LineString::new(points).unwrap());
+        MultiCurve::new([CurveProperty::new(curve_kind)]).unwrap()
     }
 
     #[test]

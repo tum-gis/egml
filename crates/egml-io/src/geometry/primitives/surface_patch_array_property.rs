@@ -1,6 +1,7 @@
 use crate::Error;
 use crate::primitives::GmlSurfacePatchKind;
-use egml_core::model::geometry::primitives::{SurfacePatchArrayProperty, SurfacePatchKind};
+use egml_core::model::geometry::primitives::SurfacePatchArrayProperty;
+use egml_core::model::geometry::primitives::SurfacePatchKind;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]

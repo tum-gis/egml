@@ -18,6 +18,15 @@ impl From<GmlMeasure> for Measure {
     }
 }
 
+impl From<&Measure> for GmlMeasure {
+    fn from(item: &Measure) -> Self {
+        Self {
+            uom: item.uom.clone(),
+            value: item.value,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

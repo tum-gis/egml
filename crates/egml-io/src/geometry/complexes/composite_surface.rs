@@ -3,7 +3,7 @@ use crate::primitives::GmlSurfaceProperty;
 use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
 use egml_core::model::geometry::aggregates::AggregationType;
 use egml_core::model::geometry::complexes::CompositeSurface;
-use egml_core::model::geometry::primitives::{AbstractSurface, SurfaceProperty};
+use egml_core::model::geometry::primitives::SurfaceProperty;
 use quick_xml::se;
 use serde::{Deserialize, Serialize};
 
@@ -23,9 +23,7 @@ impl TryFrom<GmlCompositeSurface> for CompositeSurface {
     type Error = Error;
 
     fn try_from(item: GmlCompositeSurface) -> Result<Self, Self::Error> {
-        let mut abstract_surface = AbstractSurface::default();
         let id = item.id.map(|id| id.try_into()).transpose()?;
-        abstract_surface.set_id(id);
 
         let surface_members: Vec<SurfaceProperty> = item
             .surface_members
@@ -33,8 +31,8 @@ impl TryFrom<GmlCompositeSurface> for CompositeSurface {
             .map(|x| x.try_into())
             .collect::<Result<Vec<SurfaceProperty>, Error>>()?;
 
-        let composite_surface =
-            CompositeSurface::new(abstract_surface, surface_members, AggregationType::Array)?;
+        let mut composite_surface = CompositeSurface::new(surface_members, AggregationType::Array)?;
+        composite_surface.set_id(id);
         Ok(composite_surface)
     }
 }
@@ -70,9 +68,9 @@ mod tests {
     use egml_core::model::geometry::aggregates::AggregationType;
     use egml_core::model::geometry::complexes::CompositeSurface;
     use egml_core::model::geometry::primitives::{
-        AbstractRing, AbstractSurface, LinearRing, Polygon, RingPropertyKind, SurfaceKind,
-        SurfaceProperty,
+        LinearRing, Polygon, RingProperty, SurfaceProperty,
     };
+    use egml_core::model::geometry::primitives::{RingKind, SurfaceKind};
     use quick_xml::{DeError, de};
 
     fn make_composite_surface() -> CompositeSurface {
@@ -81,20 +79,10 @@ mod tests {
             DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
-        let ring = LinearRing::new(AbstractRing::default(), points).unwrap();
-        let polygon = Polygon::new(
-            AbstractSurface::default(),
-            Some(RingPropertyKind::LinearRing(ring)),
-            vec![],
-        )
-        .unwrap();
+        let ring_kind = RingKind::LinearRing(LinearRing::new(points).unwrap());
+        let polygon = Polygon::new(Some(RingProperty::new(ring_kind)), []).unwrap();
         let surface_prop = SurfaceProperty::new(SurfaceKind::Polygon(polygon));
-        CompositeSurface::new(
-            AbstractSurface::default(),
-            vec![surface_prop],
-            AggregationType::Array,
-        )
-        .unwrap()
+        CompositeSurface::new([surface_prop], AggregationType::Array).unwrap()
     }
 
     #[test]

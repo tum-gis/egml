@@ -1,9 +1,7 @@
 use crate::Error;
 use crate::primitives::GmlSurfacePatchArrayProperty;
 use egml_core::model::base::AsAbstractGml;
-use egml_core::model::geometry::primitives::{
-    AbstractSurface, AsSurface, Surface, SurfacePatchArrayProperty,
-};
+use egml_core::model::geometry::primitives::{Surface, SurfacePatchArrayProperty};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
@@ -23,9 +21,7 @@ impl TryFrom<GmlSurface> for Surface {
 
     fn try_from(item: GmlSurface) -> Result<Self, Self::Error> {
         let patches: SurfacePatchArrayProperty = item.patches.try_into()?;
-
-        let abstract_surface = AbstractSurface::default();
-        Ok(Self::new(abstract_surface, patches))
+        Ok(Self::new(patches))
     }
 }
 

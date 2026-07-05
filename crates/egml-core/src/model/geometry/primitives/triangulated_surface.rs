@@ -1,11 +1,12 @@
 use crate::error::Error;
 use crate::impl_surface_traits;
 use crate::model::geometry::Envelope;
+use crate::model::geometry::primitives::surface_patch_kind::SurfacePatchKind;
 use crate::model::geometry::primitives::{
-    AbstractSurface, AsSurface, AsSurfaceMut, Surface, SurfacePatchArrayProperty, SurfacePatchKind,
-    Triangle,
+    AsSurface, AsSurfaceMut, Surface, SurfacePatchArrayProperty, Triangle,
 };
 use nalgebra::Isometry3;
+
 /// A 2-D surface composed exclusively of [`Triangle`] patches.
 ///
 /// Corresponds to `gml:TriangulatedSurface` in [OGC 07-036 §10.5.11.4](https://docs.ogc.org/is/07-036/07-036.pdf).
@@ -21,6 +22,12 @@ impl TriangulatedSurface {
         Ok(TriangulatedSurface { surface })
     }
 
+    pub fn surface(&self) -> &Surface {
+        &self.surface
+    }
+}
+
+impl TriangulatedSurface {
     /// Creates a `TriangulatedSurface` from a flat list of triangles.
     ///
     /// # Errors
@@ -44,10 +51,7 @@ impl TriangulatedSurface {
         let surface_patch_array_property: SurfacePatchArrayProperty =
             SurfacePatchArrayProperty::new(patches);
 
-        Self::new(Surface::new(
-            AbstractSurface::default(),
-            surface_patch_array_property,
-        ))
+        Self::new(Surface::new(surface_patch_array_property))
     }
 
     /// Merges multiple triangulated surfaces into one by combining all their patches.
@@ -74,7 +78,7 @@ impl TriangulatedSurface {
         let surface_patch_array_property: SurfacePatchArrayProperty =
             SurfacePatchArrayProperty::new(patches);
 
-        let surface = Surface::new(AbstractSurface::default(), surface_patch_array_property);
+        let surface = Surface::new(surface_patch_array_property);
         Ok(TriangulatedSurface { surface })
     }
 
@@ -96,7 +100,7 @@ impl TriangulatedSurface {
     }
 
     /// Returns the axis-aligned bounding box of all triangles.
-    pub fn compute_envelope(&self) -> Envelope {
+    pub fn compute_envelope(&self) -> Option<Envelope> {
         self.surface.compute_envelope()
     }
 }

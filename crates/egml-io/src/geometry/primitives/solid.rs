@@ -1,11 +1,11 @@
 use crate::error::Error;
 use crate::primitives::shell_property::GmlShellProperty;
 use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
-use egml_core::model::geometry::primitives::{AbstractSolid, Solid, SurfaceProperty};
+use egml_core::model::geometry::primitives::{ShellProperty, Solid};
+use egml_core::model::geometry::{AsAbstractGeometry, AsAbstractGeometryMut};
 use quick_xml::{de, se};
 use serde::{Deserialize, Serialize};
 use std::io::BufRead;
-use tracing::debug;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct GmlSolid {
@@ -14,6 +14,9 @@ pub struct GmlSolid {
         skip_serializing_if = "Option::is_none"
     )]
     id: Option<String>,
+
+    #[serde(rename = "@srsDimension", skip_serializing_if = "Option::is_none")]
+    srs_dimension: Option<u32>,
 
     #[serde(
         rename(serialize = "gml:exterior", deserialize = "exterior"),
@@ -27,35 +30,22 @@ impl TryFrom<GmlSolid> for Solid {
 
     fn try_from(value: GmlSolid) -> Result<Self, Self::Error> {
         let id = value.id.map(|id| id.try_into()).transpose()?;
-        let mut abstract_solid = AbstractSolid::default();
-        abstract_solid.set_id(id);
 
-        let surface_properties: Vec<SurfaceProperty> = value
-            .exterior
-            .ok_or(Error::ElementNotFound("gml:exterior".to_string()))?
-            .shell
-            .ok_or(Error::ElementNotFound("gml:Shell".to_string()))?
-            .members
-            .into_iter()
-            .flat_map(|x| match x.try_into() {
-                Ok(surface_property) => Some(surface_property),
-                Err(e) => {
-                    debug!("surface property contains invalid geometry: {}", e);
-                    None
-                }
-            })
-            .collect();
+        let exterior: Option<ShellProperty> = value.exterior.map(|x| x.try_into()).transpose()?;
 
-        let solid = Solid::new(abstract_solid, surface_properties)?;
+        let mut solid = Solid::new(exterior)?;
+        solid.set_id(id);
+        solid.set_srs_dimension(value.srs_dimension);
         Ok(solid)
     }
 }
 
 impl From<&Solid> for GmlSolid {
-    fn from(solid: &Solid) -> Self {
+    fn from(item: &Solid) -> Self {
         Self {
-            id: solid.id().map(|id| id.to_string()),
-            exterior: Some(GmlShellProperty::from(solid.members())),
+            id: item.id().map(|id| id.to_string()),
+            srs_dimension: item.srs_dimension(),
+            exterior: item.exterior().map(|x| x.into()),
         }
     }
 }
@@ -78,12 +68,13 @@ pub fn serialize_solid(solid: &Solid) -> Result<String, Error> {
 #[cfg(test)]
 mod tests {
     use super::GmlSolid;
+    use crate::primitives::GmlShellProperty;
     use crate::primitives::solid::{deserialize_solid, serialize_solid};
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::{
-        AbstractRing, AbstractSurface, LinearRing, Polygon, RingPropertyKind, Solid, SurfaceKind,
-        SurfaceProperty,
+        LinearRing, Polygon, RingProperty, Shell, ShellProperty, Solid, SurfaceProperty,
     };
+    use egml_core::model::geometry::primitives::{RingKind, SurfaceKind};
 
     fn make_solid() -> Solid {
         let points = vec![
@@ -91,15 +82,13 @@ mod tests {
             DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
-        let ring = LinearRing::new(AbstractRing::default(), points).unwrap();
-        let polygon = Polygon::new(
-            AbstractSurface::default(),
-            Some(RingPropertyKind::LinearRing(ring)),
-            vec![],
-        )
-        .unwrap();
+        let ring_kind = RingKind::LinearRing(LinearRing::new(points).unwrap());
+        let polygon = Polygon::new(Some(RingProperty::new(ring_kind)), []).unwrap();
         let surface_prop = SurfaceProperty::new(SurfaceKind::Polygon(polygon));
-        Solid::new(Default::default(), vec![surface_prop]).unwrap()
+        let shell = Shell::new([surface_prop]).expect("should create shell");
+        let exterior = Some(ShellProperty::new(shell));
+
+        Solid::new(exterior).unwrap()
     }
 
     #[test]
@@ -131,8 +120,9 @@ mod tests {
         </gml:Solid>";
 
         let solid_geometry = deserialize_solid(xml_document.as_ref()).unwrap();
+        let exterior_shell = solid_geometry.exterior().unwrap().object.as_ref().unwrap();
 
-        assert_eq!(solid_geometry.members().len(), 2);
+        assert_eq!(exterior_shell.members().len(), 2);
     }
 
     #[test]
@@ -148,9 +138,21 @@ mod tests {
           </gml:exterior>
         </gml:Solid>";
 
-        let solid_geometry_result = deserialize_solid(xml_document.as_ref());
+        let solid_geometry =
+            deserialize_solid(xml_document.as_ref()).expect("should deserialize solid geometry");
+        assert!(solid_geometry.exterior().is_some());
 
-        assert!(solid_geometry_result.is_err());
+        let shell = solid_geometry
+            .exterior()
+            .as_ref()
+            .unwrap()
+            .object
+            .as_ref()
+            .expect("should have exterior");
+
+        assert_eq!(shell.members().len(), 3);
+        assert!(shell.members().iter().all(|x| x.href.is_some()));
+        assert!(shell.members().iter().all(|x| x.object.is_none()));
     }
 
     #[test]
@@ -182,8 +184,9 @@ mod tests {
         </gml:Solid>";
 
         let solid_geometry = deserialize_solid(xml_document.as_ref()).unwrap();
+        let exterior_shell = solid_geometry.exterior().unwrap().object.as_ref().unwrap();
 
-        assert_eq!(solid_geometry.members().len(), 2);
+        assert_eq!(exterior_shell.members().len(), 2);
     }
 
     #[test]
@@ -205,7 +208,24 @@ mod tests {
         let xml = serialize_solid(&solid).unwrap();
         let recovered = deserialize_solid(xml.as_bytes()).unwrap();
 
-        assert_eq!(recovered.members().len(), solid.members().len());
+        assert_eq!(
+            solid
+                .exterior()
+                .unwrap()
+                .object
+                .as_ref()
+                .unwrap()
+                .members()
+                .len(),
+            recovered
+                .exterior()
+                .unwrap()
+                .object
+                .as_ref()
+                .unwrap()
+                .members()
+                .len(),
+        );
     }
 
     #[test]

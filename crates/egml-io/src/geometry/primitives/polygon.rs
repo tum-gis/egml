@@ -1,12 +1,9 @@
 use crate::Error;
-use crate::primitives::GmlLinearRingProperty;
+use crate::primitives::ring_property::GmlRingProperty;
 use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
-use egml_core::model::geometry::primitives::{
-    AbstractSurface, LinearRing, Polygon, RingPropertyKind,
-};
+use egml_core::model::geometry::primitives::{Polygon, RingProperty};
 use quick_xml::se;
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct GmlPolygon {
@@ -16,78 +13,44 @@ pub struct GmlPolygon {
     )]
     pub id: Option<String>,
 
-    #[serde(rename(serialize = "gml:exterior", deserialize = "exterior"))]
-    pub exterior: GmlLinearRingProperty,
+    #[serde(
+        rename(serialize = "gml:exterior", deserialize = "exterior",),
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub exterior: Option<GmlRingProperty>,
 
     #[serde(
         rename(serialize = "gml:interior", deserialize = "interior"),
         default,
         skip_serializing_if = "Vec::is_empty"
     )]
-    pub interior: Vec<GmlLinearRingProperty>,
+    pub interior: Vec<GmlRingProperty>,
 }
 
 impl TryFrom<GmlPolygon> for Polygon {
     type Error = Error;
 
-    fn try_from(value: GmlPolygon) -> Result<Self, Self::Error> {
-        let id = value.id.map(|id| id.try_into()).transpose()?;
-        let mut abstract_surface = AbstractSurface::default();
-        abstract_surface.set_id(id);
+    fn try_from(item: GmlPolygon) -> Result<Self, Self::Error> {
+        let id = item.id.map(|id| id.try_into()).transpose()?;
 
-        let exterior: LinearRing = value.exterior.linear_ring.unwrap().try_into()?;
-        let interior: Vec<LinearRing> = value
+        let exterior: Option<RingProperty> = item.exterior.map(|x| x.try_into()).transpose()?;
+        let interior: Vec<RingProperty> = item
             .interior
             .into_iter()
-            .flat_map(|x| x.linear_ring)
-            .flat_map(|x| {
-                let linear_ring_id = x.id.clone();
-                x.try_into()
-                    .map_err(|e| {
-                        warn!(
-                            "Error during parsing of gml:LinearRing with id={:?}: {}",
-                            &linear_ring_id, e
-                        );
-                    })
-                    .ok()
-            })
-            .collect();
+            .map(|x| x.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
 
-        let polygon = Polygon::new(
-            abstract_surface,
-            Some(RingPropertyKind::LinearRing(exterior)),
-            interior
-                .into_iter()
-                .map(RingPropertyKind::LinearRing)
-                .collect(),
-        )?;
+        let mut polygon = Polygon::new(exterior, interior)?;
+        polygon.set_id(id);
         Ok(polygon)
     }
 }
 
 impl From<&Polygon> for GmlPolygon {
     fn from(polygon: &Polygon) -> Self {
-        let exterior = polygon
-            .exterior
-            .as_ref()
-            .map(|kind| match kind {
-                RingPropertyKind::LinearRing(lr) => GmlLinearRingProperty::from(lr),
-                RingPropertyKind::RingKind(_) => {
-                    todo!("Ring exterior serialization is not yet implemented")
-                }
-            })
-            .unwrap_or(GmlLinearRingProperty { linear_ring: None });
+        let exterior: Option<GmlRingProperty> = polygon.exterior().map(|x| x.into());
 
-        let interior: Vec<GmlLinearRingProperty> = polygon
-            .interior
-            .iter()
-            .map(|kind| match kind {
-                RingPropertyKind::LinearRing(lr) => GmlLinearRingProperty::from(lr),
-                RingPropertyKind::RingKind(_) => {
-                    todo!("Ring interior serialization is not yet implemented")
-                }
-            })
-            .collect();
+        let interior: Vec<GmlRingProperty> = polygon.interior().iter().map(|x| x.into()).collect();
 
         Self {
             id: polygon.id().map(|id| id.to_string()),
@@ -112,19 +75,12 @@ mod tests {
     use super::GmlPolygon;
     use crate::primitives::polygon::serialize_polygon;
     use egml_core::model::geometry::DirectPosition;
-    use egml_core::model::geometry::primitives::{
-        AbstractRing, AbstractSurface, LinearRing, Polygon, RingPropertyKind,
-    };
+    use egml_core::model::geometry::primitives::{LinearRing, Polygon, RingKind, RingProperty};
     use quick_xml::de;
 
     fn make_polygon(points: Vec<DirectPosition>) -> Polygon {
-        let ring = LinearRing::new(AbstractRing::default(), points).unwrap();
-        Polygon::new(
-            AbstractSurface::default(),
-            Some(RingPropertyKind::LinearRing(ring)),
-            vec![],
-        )
-        .unwrap()
+        let ring_kind = RingKind::LinearRing(LinearRing::new(points).unwrap());
+        Polygon::new(Some(RingProperty::new(ring_kind)), vec![]).unwrap()
     }
 
     fn make_square() -> Polygon {
@@ -159,7 +115,7 @@ mod tests {
         let parsed_geometry: GmlPolygon = de::from_str(xml_document).expect("");
         let p: Polygon = parsed_geometry.try_into().unwrap();
 
-        assert_eq!(p.interior.len(), 2)
+        assert_eq!(p.interior().len(), 2)
     }
 
     #[test]
@@ -182,8 +138,18 @@ mod tests {
         let gml: GmlPolygon = de::from_reader(xml.as_bytes()).unwrap();
         let recovered: Polygon = gml.try_into().unwrap();
 
-        let orig = polygon.exterior.as_ref().unwrap();
-        let recov = recovered.exterior.as_ref().unwrap();
+        let orig = polygon
+            .exterior()
+            .unwrap()
+            .object
+            .as_ref()
+            .expect("ring missing");
+        let recov = recovered
+            .exterior()
+            .unwrap()
+            .object
+            .as_ref()
+            .expect("ring missing");
         assert_eq!(orig.points().len(), recov.points().len());
     }
 
@@ -214,12 +180,11 @@ mod tests {
             DirectPosition::new(3.0, 3.0, 0.0).unwrap(),
             DirectPosition::new(1.0, 3.0, 0.0).unwrap(),
         ];
-        let exterior = LinearRing::new(AbstractRing::default(), exterior_pts).unwrap();
-        let interior = LinearRing::new(AbstractRing::default(), interior_pts).unwrap();
+        let exterior = RingKind::LinearRing(LinearRing::new(exterior_pts).unwrap());
+        let interior = RingKind::LinearRing(LinearRing::new(interior_pts).unwrap());
         let polygon = Polygon::new(
-            AbstractSurface::default(),
-            Some(RingPropertyKind::LinearRing(exterior)),
-            vec![RingPropertyKind::LinearRing(interior)],
+            Some(RingProperty::new(exterior)),
+            vec![RingProperty::new(interior)],
         )
         .unwrap();
 
@@ -228,6 +193,6 @@ mod tests {
         assert!(xml.contains("<gml:interior"));
         let gml: GmlPolygon = de::from_reader(xml.as_bytes()).unwrap();
         let recovered: Polygon = gml.try_into().unwrap();
-        assert_eq!(recovered.interior.len(), 1);
+        assert_eq!(recovered.interior().len(), 1);
     }
 }

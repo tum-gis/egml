@@ -28,10 +28,10 @@ impl CompositeSurface {
     ///
     /// Returns [`Error::TooFewElements`] if `surface_members` is empty.
     pub fn new(
-        abstract_surface: AbstractSurface,
-        surface_members: Vec<SurfaceProperty>,
+        surface_members: impl IntoIterator<Item = SurfaceProperty>,
         aggregation_type: AggregationType,
     ) -> Result<Self, Error> {
+        let surface_members: Vec<SurfaceProperty> = surface_members.into_iter().collect();
         if surface_members.is_empty() {
             return Err(Error::TooFewElements {
                 geometry: "gml:CompositeSurface",
@@ -43,7 +43,7 @@ impl CompositeSurface {
         }
 
         Ok(CompositeSurface {
-            abstract_surface,
+            abstract_surface: AbstractSurface::default(),
             surface_member: surface_members,
             aggregation_type,
         })
@@ -54,11 +54,29 @@ impl CompositeSurface {
         &self.surface_member
     }
 
+    pub fn set_surface_member(&mut self, surface_members: Vec<SurfaceProperty>) {
+        self.surface_member = surface_members;
+    }
+
+    pub fn push_surface_member(&mut self, member: SurfaceProperty) {
+        self.surface_member.push(member);
+    }
+
+    pub fn extend_surface_members(&mut self, members: impl IntoIterator<Item = SurfaceProperty>) {
+        self.surface_member.extend(members);
+    }
+
     /// Returns the aggregation type that qualifies how members relate.
     pub fn aggregation_type(&self) -> AggregationType {
         self.aggregation_type
     }
 
+    pub fn set_aggregation_type(&mut self, aggregation_type: AggregationType) {
+        self.aggregation_type = aggregation_type;
+    }
+}
+
+impl CompositeSurface {
     /// Returns the number of surface members.
     pub fn surface_member_count(&self) -> usize {
         self.surface_member.len()
@@ -73,27 +91,44 @@ impl CompositeSurface {
         let triangulated_surfaces = self
             .surface_member
             .iter()
-            .map(|x| x.content.triangulate())
+            .flat_map(|x| x.object.as_ref())
+            .map(|x| x.triangulate())
             .collect::<Result<Vec<TriangulatedSurface>, Error>>()?;
 
         TriangulatedSurface::from_triangulated_surfaces(triangulated_surfaces)
     }
 
     /// Returns the union of the bounding boxes of all surface members.
-    pub fn compute_envelope(&self) -> Envelope {
+    pub fn compute_envelope(&self) -> Option<Envelope> {
         let envelopes: Vec<Envelope> = self
             .surface_member
             .iter()
-            .map(|x| x.compute_envelope())
+            .flat_map(|x| x.object.as_ref())
+            .flat_map(|x| x.compute_envelope())
             .collect::<Vec<_>>();
 
         Envelope::from_envelopes(&envelopes)
-            .expect("CompositeSurface must have at least one surface member")
+    }
+
+    pub fn area_3d(&self) -> Result<f64, Error> {
+        self.surface_member
+            .iter()
+            .map(|s| {
+                s.object
+                    .as_ref()
+                    .ok_or_else(|| Error::UnresolvedSurfaceReference {
+                        href: s.href.clone(),
+                    })
+                    .and_then(|kind| kind.area_3d())
+            })
+            .collect::<Result<Vec<f64>, Error>>()
+            .map(|area_3ds| area_3ds.into_iter().sum())
     }
 
     pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
         self.surface_member
             .par_iter_mut()
+            .flat_map(|x| x.object.as_mut())
             .for_each(|x| x.apply_transform(m));
     }
 

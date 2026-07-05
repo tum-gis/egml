@@ -1,41 +1,36 @@
 use crate::Error;
 use crate::primitives::GmlSurfaceKind;
-use egml_core::model::geometry::primitives::{SurfaceKind, SurfaceProperty};
+use egml_core::model::geometry::primitives::SurfaceProperty;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct GmlSurfaceProperty {
-    #[serde(rename = "@href", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename(serialize = "@xlink:href", deserialize = "@href"),
+        skip_serializing_if = "Option::is_none"
+    )]
     pub href: Option<String>,
 
     #[serde(rename = "$value", skip_serializing_if = "Option::is_none")]
-    pub content: Option<GmlSurfaceKind>,
+    pub object: Option<GmlSurfaceKind>,
 }
 
 impl TryFrom<GmlSurfaceProperty> for SurfaceProperty {
     type Error = Error;
 
     fn try_from(item: GmlSurfaceProperty) -> Result<Self, Self::Error> {
-        if item.href.is_some() && item.content.is_none() {
-            return Err(Error::UnsupportedXLink);
-        }
-
-        let surface: SurfaceKind = item
-            .content
-            .ok_or(Error::MissingSurfaceKind(
-                "parsing the GmlSurfaceProperty".to_string(),
-            ))?
-            .try_into()?;
-
-        Ok(SurfaceProperty::new(surface))
+        Ok(Self {
+            object: item.object.map(|x| x.try_into()).transpose()?,
+            href: item.href,
+        })
     }
 }
 
 impl From<&SurfaceProperty> for GmlSurfaceProperty {
-    fn from(prop: &SurfaceProperty) -> Self {
+    fn from(item: &SurfaceProperty) -> Self {
         Self {
-            href: None,
-            content: Some(GmlSurfaceKind::from(&prop.content)),
+            href: item.href.clone(),
+            object: item.object.as_ref().map(|x| x.into()),
         }
     }
 }
@@ -45,9 +40,9 @@ mod tests {
     use crate::primitives::GmlSurfaceProperty;
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::{
-        AbstractRing, AbstractSurface, LinearRing, Polygon, RingPropertyKind, SurfaceKind,
-        SurfaceProperty,
+        LinearRing, Polygon, RingProperty, SurfaceProperty,
     };
+    use egml_core::model::geometry::primitives::{RingKind, SurfaceKind};
     use quick_xml::{de, se};
 
     fn make_surface_property() -> SurfaceProperty {
@@ -56,13 +51,8 @@ mod tests {
             DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
-        let ring = LinearRing::new(AbstractRing::default(), points).unwrap();
-        let polygon = Polygon::new(
-            AbstractSurface::default(),
-            Some(RingPropertyKind::LinearRing(ring)),
-            vec![],
-        )
-        .unwrap();
+        let ring_kind = RingKind::LinearRing(LinearRing::new(points).unwrap());
+        let polygon = Polygon::new(Some(RingProperty::new(ring_kind)), vec![]).unwrap();
         SurfaceProperty::new(SurfaceKind::Polygon(polygon))
     }
 

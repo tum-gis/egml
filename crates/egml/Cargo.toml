@@ -11,6 +11,6 @@ description = "Library for processing GML data."
 
 
 [dependencies]
-egml-core = { version = "0.0.2-alpha.3", path = "../egml-core" }
-egml-io = { version = "0.0.2-alpha.3", path = "../egml-io" }
-egml-transform = { version = "0.0.2-alpha.3", path = "../egml-transform" }
+egml-core = { version = "0.0.2-alpha.4", path = "../egml-core" }
+egml-io = { version = "0.0.2-alpha.4", path = "../egml-io" }
+egml-transform = { version = "0.0.2-alpha.4", path = "../egml-transform" }

@@ -1,12 +1,6 @@
-use crate::Error;
-use crate::model::geometry::complexes::CompositeSurface;
 use crate::model::geometry::primitives::{
     AbstractGeometricPrimitive, AsAbstractGeometricPrimitive, AsAbstractGeometricPrimitiveMut,
-    Polygon, Surface, TriangulatedSurface,
 };
-use crate::model::geometry::{DirectPosition, Envelope};
-use nalgebra::Isometry3;
-
 /// Base data shared by all GML surface geometry types ([OGC 07-036 §10.5.1](https://docs.ogc.org/is/07-036/07-036.pdf)).
 ///
 /// A surface is a 2-D geometric primitive.  Concrete surface types include
@@ -75,70 +69,3 @@ macro_rules! impl_abstract_surface_traits {
 }
 
 impl_abstract_surface_traits!(AbstractSurface);
-
-/// Discriminated union of all concrete surface implementations.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SurfaceKind {
-    /// A patched [`Surface`].
-    Surface(Surface),
-    /// A planar [`Polygon`].
-    Polygon(Polygon),
-    /// A topology-aware [`CompositeSurface`].
-    CompositeSurface(CompositeSurface),
-}
-
-impl AsAbstractSurface for SurfaceKind {
-    fn abstract_surface(&self) -> &AbstractSurface {
-        match self {
-            Self::Surface(x) => x.abstract_surface(),
-            Self::Polygon(x) => x.abstract_surface(),
-            Self::CompositeSurface(x) => x.abstract_surface(),
-        }
-    }
-}
-
-impl AsAbstractSurfaceMut for SurfaceKind {
-    fn abstract_surface_mut(&mut self) -> &mut AbstractSurface {
-        match self {
-            Self::Surface(x) => x.abstract_surface_mut(),
-            Self::Polygon(x) => x.abstract_surface_mut(),
-            Self::CompositeSurface(x) => x.abstract_surface_mut(),
-        }
-    }
-}
-
-impl_abstract_surface_traits!(SurfaceKind);
-
-impl SurfaceKind {
-    pub fn triangulate(&self) -> Result<TriangulatedSurface, Error> {
-        match self {
-            Self::Surface(x) => x.triangulate(),
-            Self::Polygon(x) => x.triangulate(),
-            Self::CompositeSurface(x) => x.triangulate(),
-        }
-    }
-
-    pub fn compute_envelope(&self) -> Envelope {
-        match self {
-            Self::Surface(x) => x.compute_envelope(),
-            Self::Polygon(x) => x.compute_envelope(),
-            Self::CompositeSurface(x) => x.compute_envelope(),
-        }
-    }
-
-    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
-        match self {
-            Self::Surface(x) => x.apply_transform(m),
-            Self::Polygon(x) => x.apply_transform(m),
-            Self::CompositeSurface(x) => x.apply_transform(m),
-        }
-    }
-
-    pub fn points(&self) -> Vec<&DirectPosition> {
-        match self {
-            Self::Surface(x) => x.points(),
-            Self::Polygon(x) => x.points(),
-            Self::CompositeSurface(x) => x.points(),
-        }
-    }
-}

@@ -7,12 +7,16 @@ use crate::model::base::{AbstractGml, AsAbstractGml, AsAbstractGmlMut};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AbstractGeometry {
     pub(crate) abstract_gml: AbstractGml,
+    srs_dimension: Option<u32>,
 }
 
 impl AbstractGeometry {
     /// Creates a new `AbstractGeometry` wrapping the provided GML base data.
     pub fn new(abstract_gml: AbstractGml) -> Self {
-        Self { abstract_gml }
+        Self {
+            abstract_gml,
+            srs_dimension: None,
+        }
     }
 }
 
@@ -20,12 +24,20 @@ impl AbstractGeometry {
 pub trait AsAbstractGeometry: AsAbstractGml {
     /// Returns a reference to the embedded [`AbstractGeometry`] base data.
     fn abstract_geometry(&self) -> &AbstractGeometry;
+
+    fn srs_dimension(&self) -> Option<u32> {
+        self.abstract_geometry().srs_dimension
+    }
 }
 
 /// Mutable companion to [`AsAbstractGeometry`].
 pub trait AsAbstractGeometryMut: AsAbstractGeometry + AsAbstractGmlMut {
     /// Returns a mutable reference to the embedded [`AbstractGeometry`] base data.
     fn abstract_geometry_mut(&mut self) -> &mut AbstractGeometry;
+
+    fn set_srs_dimension(&mut self, srs_dimension: Option<u32>) {
+        self.abstract_geometry_mut().srs_dimension = srs_dimension;
+    }
 }
 
 impl AsAbstractGeometry for AbstractGeometry {

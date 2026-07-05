@@ -1,38 +1,45 @@
 use crate::Error;
-use crate::primitives::abstract_ring::GmlRingKind;
 use crate::primitives::linear_ring::GmlLinearRing;
-use egml_core::model::geometry::primitives::{LinearRing, RingPropertyKind};
+use crate::primitives::ring_kind::GmlRingKind;
+use egml_core::model::geometry::primitives::{LinearRing, RingProperty};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct GmlRingProperty {
+    #[serde(
+        rename(serialize = "@xlink:href", deserialize = "@href"),
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub href: Option<String>,
+
     #[serde(rename = "$value")]
-    pub content: GmlRingKind,
+    pub object: Option<GmlRingKind>,
 }
 
-impl TryFrom<GmlRingProperty> for RingPropertyKind {
+impl TryFrom<GmlRingProperty> for RingProperty {
     type Error = Error;
 
     fn try_from(item: GmlRingProperty) -> Result<Self, Self::Error> {
-        match item.content {
-            GmlRingKind::LinearRing(x) => x.try_into().map(RingPropertyKind::LinearRing),
-            GmlRingKind::Ring(_) => todo!("needs to be implemented"),
-        }
+        Ok(Self {
+            href: item.href,
+            object: item.object.map(|x| x.try_into()).transpose()?,
+        })
     }
 }
 
 impl From<&LinearRing> for GmlRingProperty {
     fn from(ring: &LinearRing) -> Self {
         Self {
-            content: GmlRingKind::LinearRing(GmlLinearRing::from(ring)),
+            href: None,
+            object: Some(GmlRingKind::LinearRing(GmlLinearRing::from(ring))),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::primitives::abstract_ring::GmlRingKind;
-    use crate::primitives::abstract_ring_property::GmlRingProperty;
+    use crate::primitives::ring_kind::GmlRingKind;
+    use crate::primitives::ring_property::GmlRingProperty;
     use egml_core::model::geometry::primitives::RingKind;
     use quick_xml::{DeError, de};
 
@@ -48,10 +55,12 @@ mod tests {
 </gml:exterior>";
 
         let result: Result<GmlRingProperty, DeError> = de::from_reader(xml_document.as_ref());
-        let gml_ring_kind = result.unwrap().content;
+        let gml_ring_kind = result.unwrap().object.expect("should be there");
         let ring_kind: RingKind = gml_ring_kind.try_into().unwrap();
 
-        let RingKind::LinearRing(linear_ring) = ring_kind;
+        let RingKind::LinearRing(linear_ring) = ring_kind else {
+            panic!("expected LinearRing variant");
+        };
 
         assert_eq!(linear_ring.points().len(), 3);
     }
@@ -72,7 +81,7 @@ mod tests {
 </gml:exterior>";
 
         let result: Result<GmlRingProperty, DeError> = de::from_reader(xml_document.as_ref());
-        let gml_ring_kind = result.unwrap().content;
+        let gml_ring_kind = result.unwrap().object.expect("should be there");
 
         match gml_ring_kind {
             GmlRingKind::Ring(_) => {} // Success case

@@ -89,6 +89,40 @@ pub enum Error {
     /// `context` provides additional information about which polygon or patch
     /// could not be decomposed.
     TriangulationFailed { context: String },
+
+    /// Returned when an operation requires an exterior ring but the polygon has none.
+    MissingExteriorRing,
+
+    /// Returned when a ring property carries only an xlink:href reference and the
+    /// referenced geometry object has not been resolved into an inline object.
+    ///
+    /// `href` is the reference value if one was present, or `None` if the property
+    /// has neither an inline object nor a reference.
+    UnresolvedRingReference { href: Option<String> },
+
+    /// Returned when a surface property carries only an xlink:href reference and the
+    /// referenced geometry object has not been resolved into an inline object.
+    ///
+    /// `href` is the reference value if one was present, or `None` if the property
+    /// has neither an inline object nor a reference.
+    UnresolvedSurfaceReference { href: Option<String> },
+
+    /// Returned when a curve property carries only an xlink:href reference and the
+    /// referenced geometry object has not been resolved into an inline object.
+    ///
+    /// `href` is the reference value if one was present, or `None` if the property
+    /// has neither an inline object nor a reference.
+    UnresolvedCurveReference { href: Option<String> },
+
+    /// Returned when an operation requires an exterior shell but the solid has none.
+    MissingExteriorShell,
+
+    /// Returned when a shell property carries only an xlink:href reference and the
+    /// referenced geometry object has not been resolved into an inline object.
+    ///
+    /// `href` is the reference value if one was present, or `None` if the property
+    /// has neither an inline object nor a reference.
+    UnresolvedShellReference { href: Option<String> },
 }
 
 impl fmt::Display for Error {
@@ -157,6 +191,48 @@ impl fmt::Display for Error {
             Error::TriangulationFailed { context } => {
                 write!(f, "polygon triangulation (earcut) failed: {context}")
             }
+            Error::MissingExteriorRing => write!(
+                f,
+                "polygon has no exterior ring; \
+                 operation requires a defined outer boundary (OGC 07-036 §10.5.6)"
+            ),
+            Error::UnresolvedRingReference { href: Some(href) } => write!(
+                f,
+                "ring property references '{href}' via xlink:href but the object has not been resolved"
+            ),
+            Error::UnresolvedRingReference { href: None } => write!(
+                f,
+                "ring property has neither an inline object nor an xlink:href reference"
+            ),
+            Error::UnresolvedSurfaceReference { href: Some(href) } => write!(
+                f,
+                "surface property references '{href}' via xlink:href but the object has not been resolved"
+            ),
+            Error::UnresolvedSurfaceReference { href: None } => write!(
+                f,
+                "surface property has neither an inline object nor an xlink:href reference"
+            ),
+            Error::UnresolvedCurveReference { href: Some(href) } => write!(
+                f,
+                "curve property references '{href}' via xlink:href but the object has not been resolved"
+            ),
+            Error::UnresolvedCurveReference { href: None } => write!(
+                f,
+                "curve property has neither an inline object nor an xlink:href reference"
+            ),
+            Error::MissingExteriorShell => write!(
+                f,
+                "solid has no exterior shell; \
+                 operation requires a defined outer boundary (OGC 07-036 §10.6.4)"
+            ),
+            Error::UnresolvedShellReference { href: Some(href) } => write!(
+                f,
+                "shell property references '{href}' via xlink:href but the object has not been resolved"
+            ),
+            Error::UnresolvedShellReference { href: None } => write!(
+                f,
+                "shell property has neither an inline object nor an xlink:href reference"
+            ),
         }
     }
 }

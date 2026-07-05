@@ -21,18 +21,15 @@ impl Point {
     ///
     /// ```rust
     /// use egml_core::model::geometry::DirectPosition;
-    /// use egml_core::model::geometry::primitives::{AbstractGeometricPrimitive, Point};
+    /// use egml_core::model::geometry::primitives::Point;
     ///
     /// let pos = DirectPosition::new(1.0, 2.0, 3.0).unwrap();
-    /// let pt = Point::new(AbstractGeometricPrimitive::default(), pos);
+    /// let pt = Point::new(pos);
     /// assert_eq!(pt.pos().x(), 1.0);
     /// ```
-    pub fn new(
-        abstract_geometric_primitive: AbstractGeometricPrimitive,
-        pos: DirectPosition,
-    ) -> Self {
+    pub fn new(pos: DirectPosition) -> Self {
         Self {
-            abstract_geometric_primitive,
+            abstract_geometric_primitive: AbstractGeometricPrimitive::default(),
             pos,
         }
     }
@@ -42,6 +39,12 @@ impl Point {
         &self.pos
     }
 
+    pub fn set_pos(&mut self, pos: DirectPosition) {
+        self.pos = pos;
+    }
+}
+
+impl Point {
     /// Applies a rigid-body transform to this point in place.
     pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
         self.pos.apply_transform(m);

@@ -3,7 +3,7 @@ use crate::impl_abstract_ring_traits;
 use crate::model::base::{AsAbstractGml, Id};
 use crate::model::geometry::primitives::{AbstractRing, AsAbstractRing, AsAbstractRingMut};
 use crate::model::geometry::{DirectPosition, Envelope};
-use nalgebra::Isometry3;
+use nalgebra::{Isometry3, Vector3};
 
 const MINIMUM_NUMBER_OF_POINTS: usize = 3;
 
@@ -31,12 +31,18 @@ impl LinearRing {
     /// Returns [`Error::TooFewElements`] if `points` has fewer than 3 entries.
     /// Returns [`Error::AdjacentDuplicatePositions`] if adjacent positions are equal.
     /// Returns [`Error::RepeatedClosingVertex`] if the first and last positions are equal.
-    pub fn new(abstract_ring: AbstractRing, points: Vec<DirectPosition>) -> Result<Self, Error> {
-        Self::validate_points(&points, abstract_ring.id())?;
+    pub fn new(points: impl IntoIterator<Item = DirectPosition>) -> Result<Self, Error> {
+        let points: Vec<DirectPosition> = points.into_iter().collect();
+        Self::validate_points(&points, None)?;
         Ok(Self {
-            abstract_ring,
+            abstract_ring: AbstractRing::default(),
             points,
         })
+    }
+
+    /// Returns the positions of this ring.
+    pub fn points(&self) -> &[DirectPosition] {
+        &self.points
     }
 
     /// Replaces the positions of this ring.
@@ -49,17 +55,29 @@ impl LinearRing {
         self.points = val;
         Ok(())
     }
+}
 
-    /// Returns the positions of this ring.
-    pub fn points(&self) -> &[DirectPosition] {
-        &self.points
-    }
-
+impl LinearRing {
     /// Applies a rigid-body transform to all positions in place.
     pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
         self.points.iter_mut().for_each(|p| {
             p.apply_transform(m);
         });
+    }
+
+    /// Returns the 3D area_3d of this ring using the cross-product summation formula.
+    ///
+    /// Computes `|Σ (vᵢ × vᵢ₊₁)| / 2` over all consecutive vertex pairs (with wrap-around),
+    /// which gives the correct planar area_3d regardless of orientation in 3D space.
+    pub fn area_3d(&self) -> f64 {
+        let n = self.points.len();
+        let mut cross_sum = Vector3::zeros();
+        for i in 0..n {
+            let vi: Vector3<f64> = self.points[i].into();
+            let vj: Vector3<f64> = self.points[(i + 1) % n].into();
+            cross_sum += vi.cross(&vj);
+        }
+        cross_sum.norm() * 0.5
     }
 
     /// Returns the axis-aligned bounding box of all positions in this ring.
@@ -124,8 +142,45 @@ mod test {
     use nalgebra::Vector3;
 
     #[test]
+    fn area_3d_unit_square_xy() {
+        let ring = LinearRing::new([
+            DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 1.0, 0.0).unwrap(),
+            DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
+        ])
+        .unwrap();
+        assert!((ring.area_3d() - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn area_3d_tilted_rectangle() {
+        // Rectangle with sides 1 and sqrt(5) tilted in 3D — area_3d should be sqrt(5).
+        let ring = LinearRing::new([
+            DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 1.0, 2.0).unwrap(),
+            DirectPosition::new(0.0, 1.0, 2.0).unwrap(),
+        ])
+        .unwrap();
+        let expected = 5.0_f64.sqrt();
+        assert!((ring.area_3d() - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn area_3d_triangle() {
+        // Right triangle with legs 3 and 4 — area_3d should be 6.
+        let ring = LinearRing::new([
+            DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(3.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(0.0, 4.0, 0.0).unwrap(),
+        ])
+        .unwrap();
+        assert!((ring.area_3d() - 6.0).abs() < 1e-10);
+    }
+
+    #[test]
     fn linear_ring_construction_test() {
-        let abstract_ring = AbstractRing::default();
         let points = vec![
             DirectPosition::new(601.92791444745251, 1130.4631113024607, 9.0130903915382347)
                 .unwrap(),
@@ -134,7 +189,7 @@ mod test {
             DirectPosition::new(601.92791832847342, 1130.4631032795705, 9.0130907233102739)
                 .unwrap(),
         ];
-        let result = LinearRing::new(abstract_ring, points);
+        let result = LinearRing::new(points);
 
         assert!(matches!(
             result,
@@ -144,26 +199,20 @@ mod test {
 
     #[test]
     fn offset_linear_ring_test() {
-        let mut linear_ring = LinearRing::new(
-            AbstractRing::default(),
-            vec![
-                DirectPosition::new(1.0, 2.0, 3.0).unwrap(),
-                DirectPosition::new(2.0, 4.0, 6.0).unwrap(),
-                DirectPosition::new(4.0, 7.0, 9.0).unwrap(),
-            ],
-        )
+        let mut linear_ring = LinearRing::new([
+            DirectPosition::new(1.0, 2.0, 3.0).unwrap(),
+            DirectPosition::new(2.0, 4.0, 6.0).unwrap(),
+            DirectPosition::new(4.0, 7.0, 9.0).unwrap(),
+        ])
         .unwrap();
         //let offset = nalgebra::Vector3::<f64>::new(1.0, -1.0, 3.0);
         let isometry: Isometry3<f64> =
             Isometry3::new(Vector3::new(1.0, -1.0, 3.0), Default::default());
-        let expected_linear_ring = LinearRing::new(
-            AbstractRing::default(),
-            vec![
-                DirectPosition::new(2.0, 1.0, 6.0).unwrap(),
-                DirectPosition::new(3.0, 3.0, 9.0).unwrap(),
-                DirectPosition::new(5.0, 6.0, 12.0).unwrap(),
-            ],
-        )
+        let expected_linear_ring = LinearRing::new([
+            DirectPosition::new(2.0, 1.0, 6.0).unwrap(),
+            DirectPosition::new(3.0, 3.0, 9.0).unwrap(),
+            DirectPosition::new(5.0, 6.0, 12.0).unwrap(),
+        ])
         .unwrap();
 
         linear_ring.apply_transform(&isometry);

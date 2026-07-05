@@ -1,8 +1,7 @@
 use crate::Error;
-use crate::primitives::abstract_ring_property::GmlRingProperty;
-use egml_core::model::geometry::primitives::{
-    AbstractRing, LinearRing, RingPropertyKind, Triangle,
-};
+use crate::primitives::ring_property::GmlRingProperty;
+use egml_core::model::geometry::primitives::RingKind;
+use egml_core::model::geometry::primitives::{LinearRing, RingProperty, Triangle};
 use quick_xml::se;
 use serde::{Deserialize, Serialize};
 
@@ -22,9 +21,9 @@ impl TryFrom<GmlTriangle> for Triangle {
     type Error = Error;
 
     fn try_from(item: GmlTriangle) -> Result<Triangle, Self::Error> {
-        let exterior: RingPropertyKind = item.exterior.try_into()?;
-        let exterior: LinearRing = match exterior {
-            RingPropertyKind::LinearRing(x) => x,
+        let exterior: RingProperty = item.exterior.try_into()?;
+        let exterior: LinearRing = match exterior.object.expect("to be implemented") {
+            RingKind::LinearRing(x) => x,
             _ => todo!("needs to be implemented"),
         };
 
@@ -45,8 +44,8 @@ impl TryFrom<GmlTriangle> for Triangle {
 impl From<&Triangle> for GmlTriangle {
     fn from(triangle: &Triangle) -> Self {
         let points = vec![triangle.a, triangle.b, triangle.c];
-        let linear_ring = LinearRing::new(AbstractRing::default(), points)
-            .expect("triangle always yields a valid linear ring");
+        let linear_ring =
+            LinearRing::new(points).expect("triangle always yields a valid linear ring");
         Self {
             id: None,
             exterior: GmlRingProperty::from(&linear_ring),
