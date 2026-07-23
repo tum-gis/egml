@@ -24,7 +24,7 @@ impl Id {
     /// use egml_core::model::base::Id;
     ///
     /// let id = Id::from_hashed_bytes(b"hello");
-    /// assert_eq!(id.to_string().len(), 64);
+    /// assert_eq!(id.as_str().len(), 64);
     /// ```
     pub fn from_hashed_bytes(val: impl AsRef<[u8]>) -> Self {
         Self(Self::hash_bytes_to_hex(val.as_ref()))
@@ -60,26 +60,75 @@ impl Id {
     /// use egml_core::model::base::Id;
     ///
     /// let id = Id::generate_uuid_v4();
-    /// assert!(!id.to_string().is_empty());
+    /// assert!(!id.as_str().is_empty());
     /// ```
     pub fn generate_uuid_v4() -> Self {
         Self(Uuid::new_v4().to_string())
     }
+
+    /// Generates a time-ordered UUID v7 as an `Id`.
+    ///
+    /// v7 encodes a millisecond-precision Unix timestamp in the high bits,
+    /// making ids lexicographically sortable by creation time — preferable
+    /// over v4 when ids are stored in a database index.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use egml_core::model::base::Id;
+    ///
+    /// let a = Id::generate_uuid_v7();
+    /// let b = Id::generate_uuid_v7();
+    /// assert!(a.as_str() <= b.as_str());
+    /// ```
+    pub fn generate_uuid_v7() -> Self {
+        Self(Uuid::now_v7().to_string())
+    }
+
+    /// Generates a deterministic UUID v5 from a namespace and a name.
+    ///
+    /// Two calls with the same `namespace` and `name` always produce the same
+    /// id. Use the predefined namespace constants on [`Uuid`] (e.g.
+    /// [`Uuid::NAMESPACE_URL`]) or supply a custom one.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use egml_core::model::base::Id;
+    /// use uuid::Uuid;
+    ///
+    /// let id_a = Id::generate_uuid_v5(&Uuid::NAMESPACE_URL, "https://example.com/object-1");
+    /// let id_b = Id::generate_uuid_v5(&Uuid::NAMESPACE_URL, "https://example.com/object-1");
+    /// assert_eq!(id_a, id_b);
+    /// ```
+    pub fn generate_uuid_v5(namespace: &Uuid, name: &str) -> Self {
+        Self(Uuid::new_v5(namespace, name.as_bytes()).to_string())
+    }
+
+    /// Returns the id as a string slice.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl Id {
-    // Low-level helper for hashing bytes
     fn hash_bytes_to_hex(val: &[u8]) -> String {
         let mut sha256 = Sha256::new();
         sha256.update(val);
         let result = sha256.finalize();
 
-        // Preallocate 64-char string
         let mut hash = String::with_capacity(64);
         for byte in result {
             write!(&mut hash, "{:02X}", byte).unwrap();
         }
         hash
+    }
+
+    fn validate(s: &str) -> Result<(), Error> {
+        if s.is_empty() {
+            return Err(Error::EmptyId);
+        }
+        Ok(())
     }
 }
 
@@ -89,45 +138,15 @@ impl From<Id> for String {
     }
 }
 
-impl TryFrom<&String> for Id {
-    type Error = Error;
-
-    /// # Errors
-    ///
-    /// Returns [`Error::TooFewElements`] if the string is empty.
-    fn try_from(item: &String) -> Result<Self, Self::Error> {
-        if item.is_empty() {
-            Err(Error::TooFewElements {
-                geometry: "gml:id",
-                minimum: 1,
-                spec: None,
-                id: None,
-                detail: Some("id string must not be empty".to_string()),
-            })
-        } else {
-            Ok(Self(item.to_string()))
-        }
-    }
-}
-
 impl TryFrom<&str> for Id {
     type Error = Error;
 
     /// # Errors
     ///
-    /// Returns [`Error::TooFewElements`] if the string slice is empty.
+    /// Returns [`Error::EmptyId`] if the string slice is empty.
     fn try_from(item: &str) -> Result<Self, Self::Error> {
-        if item.is_empty() {
-            Err(Error::TooFewElements {
-                geometry: "gml:id",
-                minimum: 1,
-                spec: None,
-                id: None,
-                detail: Some("id string must not be empty".to_string()),
-            })
-        } else {
-            Ok(Self(item.to_string()))
-        }
+        Self::validate(item)?;
+        Ok(Self(item.to_string()))
     }
 }
 
@@ -136,31 +155,16 @@ impl TryFrom<String> for Id {
 
     /// # Errors
     ///
-    /// Returns [`Error::TooFewElements`] if the owned string is empty.
+    /// Returns [`Error::EmptyId`] if the owned string is empty.
     fn try_from(item: String) -> Result<Self, Self::Error> {
-        if item.is_empty() {
-            Err(Error::TooFewElements {
-                geometry: "gml:id",
-                minimum: 1,
-                spec: None,
-                id: None,
-                detail: Some("id string must not be empty".to_string()),
-            })
-        } else {
-            Ok(Self(item))
-        }
+        Self::validate(&item)?;
+        Ok(Self(item))
     }
 }
 
-/*impl From<String> for Id {
-    fn from(item: String) -> Self {
-        Self(item)
-    }
-}*/
-
 impl fmt::Display for Id {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
+        f.write_str(&self.0)
     }
 }
 
@@ -169,28 +173,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn id_from_empty_string() {
-        let result = Id::try_from("".to_string());
-
-        assert!(matches!(
-            result,
-            Err(Error::TooFewElements {
-                geometry: "gml:id",
-                minimum: 1,
-                ..
-            })
-        ));
+    fn try_from_empty_string_returns_empty_id_error() {
+        assert_eq!(Id::try_from(""), Err(Error::EmptyId));
+        assert_eq!(Id::try_from("".to_string()), Err(Error::EmptyId));
     }
 
     #[test]
-    fn test() {
-        let xml_document = "<gml:Point>
-              <gml:pos srsDimension=\"3\">678000.9484065345 5403659.060043676 417.3802376791456</gml:pos>
-            </gml:Point>";
-
-        let id_a = Id::from_hashed_string(xml_document);
-        let id_b = Id::from_hashed_string(xml_document);
-
-        assert_eq!(id_a, id_b);
+    fn from_hashed_string_is_deterministic() {
+        let xml = "<gml:Point><gml:pos>1 2 3</gml:pos></gml:Point>";
+        assert_eq!(Id::from_hashed_string(xml), Id::from_hashed_string(xml));
     }
 }

@@ -8,11 +8,19 @@ use crate::model::geometry::primitives::{
 /// is [`LineString`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AbstractCurve {
-    pub(crate) abstract_geometric_primitive: AbstractGeometricPrimitive,
+    pub abstract_geometric_primitive: AbstractGeometricPrimitive,
 }
 
 impl AbstractCurve {
-    pub fn new(abstract_geometric_primitive: AbstractGeometricPrimitive) -> Self {
+    pub fn new() -> Self {
+        Self {
+            abstract_geometric_primitive: AbstractGeometricPrimitive::default(),
+        }
+    }
+
+    pub fn from_abstract_geometric_primitive(
+        abstract_geometric_primitive: AbstractGeometricPrimitive,
+    ) -> Self {
         Self {
             abstract_geometric_primitive,
         }
@@ -43,7 +51,6 @@ impl AsAbstractCurveMut for AbstractCurve {
     }
 }
 
-#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_abstract_curve_traits {
     ($type:ty) => {
@@ -53,20 +60,30 @@ macro_rules! impl_abstract_curve_traits {
             fn abstract_geometric_primitive(
                 &self,
             ) -> &$crate::model::geometry::primitives::AbstractGeometricPrimitive {
-                use $crate::model::geometry::primitives::AsAbstractCurve;
-                &self.abstract_curve().abstract_geometric_primitive
+                &<$type as $crate::model::geometry::primitives::AsAbstractCurve>::abstract_curve(
+                    self,
+                )
+                .abstract_geometric_primitive
             }
         }
+    };
+}
+
+#[macro_export]
+macro_rules! impl_abstract_curve_mut_traits {
+    ($type:ty) => {
+        $crate::impl_abstract_geometric_primitive_mut_traits!($type);
 
         impl $crate::model::geometry::primitives::AsAbstractGeometricPrimitiveMut for $type {
             fn abstract_geometric_primitive_mut(
                 &mut self,
             ) -> &mut $crate::model::geometry::primitives::AbstractGeometricPrimitive {
-                use $crate::model::geometry::primitives::AsAbstractCurveMut;
-                &mut self.abstract_curve_mut().abstract_geometric_primitive
+                &mut <$type as $crate::model::geometry::primitives::AsAbstractCurveMut>::abstract_curve_mut(self)
+                    .abstract_geometric_primitive
             }
         }
     };
 }
 
 impl_abstract_curve_traits!(AbstractCurve);
+impl_abstract_curve_mut_traits!(AbstractCurve);

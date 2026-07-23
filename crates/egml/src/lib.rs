@@ -23,7 +23,12 @@
 //! ```
 //!
 
-pub use egml_core::{Error, model, util};
+pub use egml_core::{Error, model, resolver, util};
+
+pub use egml_core::{
+    impl_abstract_feature_mut_traits, impl_abstract_feature_traits, impl_abstract_gml_mut_traits,
+    impl_abstract_gml_traits,
+};
 
 pub use egml_io as io;
 

@@ -17,6 +17,9 @@ parry3d-f64 = { workspace = true }
 itertools = { workspace = true }
 rayon = { workspace = true }
 approx = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
+uuid = { workspace = true, features = ["v4", "v5", "v7"] }
 sha2 = { workspace = true }
 earcut = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
+auto_enums = { workspace = true }

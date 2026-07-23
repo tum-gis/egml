@@ -1,11 +1,13 @@
 use crate::error::Error;
+use crate::model::AbstractObject;
+use crate::model::common::{ApplyTransform, Triangulate, Triangulation};
 use crate::model::geometry::DirectPosition;
+use crate::model::geometry::primitives::{AbstractRingKind, Shell};
 use crate::model::geometry::primitives::{
-    LinearRing, Polygon, RingProperty, Solid, SurfaceProperty, TriangulatedSurface,
+    AbstractRingProperty, AbstractSurfaceProperty, LinearRing, Polygon, Solid, TriangulatedSurface,
 };
-use crate::model::geometry::primitives::{RingKind, Shell};
-use crate::model::geometry::primitives::{ShellProperty, SurfaceKind};
-use nalgebra::{Isometry3, Point3, Vector3};
+use crate::model::geometry::primitives::{AbstractSurfaceKind, ShellProperty};
+use nalgebra::{Isometry3, Point3, Rotation3, Scale3, Transform3, Vector3};
 use std::fmt;
 
 /// Axis-aligned bounding box in 3-D space.
@@ -17,9 +19,9 @@ use std::fmt;
 /// Corresponds to `gml:EnvelopeType` in ISO 19136.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Envelope {
+    abstract_object: AbstractObject,
     lower_corner: DirectPosition,
     upper_corner: DirectPosition,
-
     srs_name: Option<String>,
     srs_dimension: Option<u8>,
 }
@@ -67,6 +69,7 @@ impl Envelope {
         }
 
         Ok(Self {
+            abstract_object: AbstractObject::default(),
             lower_corner,
             upper_corner,
             srs_name: None,
@@ -81,10 +84,7 @@ impl Envelope {
     /// or equal to the corresponding component of `upper_corner`. Violating this
     /// will not cause undefined behavior, but will break the type's invariants
     /// and produce incorrect results from methods like `contains`, `size`, etc.
-    pub(crate) fn new_unchecked(
-        lower_corner: DirectPosition,
-        upper_corner: DirectPosition,
-    ) -> Self {
+    pub fn new_unchecked(lower_corner: DirectPosition, upper_corner: DirectPosition) -> Self {
         debug_assert!(
             {
                 let lc: Point3<f64> = lower_corner.into();
@@ -95,6 +95,7 @@ impl Envelope {
         );
 
         Self {
+            abstract_object: AbstractObject::default(),
             lower_corner,
             upper_corner,
             srs_name: None,
@@ -112,6 +113,14 @@ impl Envelope {
         &self.upper_corner
     }
 
+    pub fn set_lower_corner(&mut self, lower_corner: DirectPosition) {
+        self.lower_corner = lower_corner;
+    }
+
+    pub fn set_upper_corner(&mut self, upper_corner: DirectPosition) {
+        self.upper_corner = upper_corner;
+    }
+
     /// Returns the SRS name identifying the CRS of this envelope's coordinates,
     /// or `None` if unspecified.
     pub fn srs_name(&self) -> Option<&str> {
@@ -124,17 +133,34 @@ impl Envelope {
         self.srs_dimension
     }
 
-    /// Sets the SRS (Spatial Reference System) name, identifying the CRS in which
-    /// this envelope's coordinates are expressed (e.g. `"urn:ogc:def:crs:EPSG::25832"`).
-    /// Pass `None` to leave the CRS unspecified.
-    pub fn set_srs_name(&mut self, srs_name: Option<String>) {
+    /// Sets the SRS name identifying the CRS (e.g. `"urn:ogc:def:crs:EPSG::25832"`).
+    pub fn set_srs_name(&mut self, srs_name: impl Into<String>) {
+        self.srs_name = Some(srs_name.into());
+    }
+
+    /// Sets or clears the SRS name.
+    pub fn set_srs_name_opt(&mut self, srs_name: Option<String>) {
         self.srs_name = srs_name;
     }
 
+    /// Clears the SRS name.
+    pub fn clear_srs_name(&mut self) {
+        self.srs_name = None;
+    }
+
     /// Sets the coordinate dimension of this envelope's positions (typically `2` or `3`).
-    /// Pass `None` to leave the dimension implicit.
-    pub fn set_srs_dimension(&mut self, srs_dimension: Option<u8>) {
+    pub fn set_srs_dimension(&mut self, srs_dimension: u8) {
+        self.srs_dimension = Some(srs_dimension);
+    }
+
+    /// Sets or clears the coordinate dimension.
+    pub fn set_srs_dimension_opt(&mut self, srs_dimension: Option<u8>) {
         self.srs_dimension = srs_dimension;
+    }
+
+    /// Clears the coordinate dimension.
+    pub fn clear_srs_dimension(&mut self) {
+        self.srs_dimension = None;
     }
 
     /// Returns the diagonal vector from the lower corner to the upper corner.
@@ -227,9 +253,20 @@ impl Envelope {
         self.contains(&envelope.lower_corner) && self.contains(&envelope.upper_corner)
     }
 
-    /// Returns `true` if any corner of `envelope` lies inside or on the boundary of `self`.
+    /// Returns `true` if `self` and `envelope` overlap at all (including touching).
+    ///
+    /// Uses the standard per-axis AABB overlap test rather than checking corners:
+    /// two boxes intersect iff they overlap on every axis independently. A
+    /// corner-only check would miss cases like a thin slab passing straight
+    /// through the other box, where neither box's own min/max corner lies
+    /// inside the other.
     pub fn contains_envelope_partially(&self, envelope: &Envelope) -> bool {
-        self.contains(&envelope.lower_corner) || self.contains(&envelope.upper_corner)
+        self.lower_corner.x() <= envelope.upper_corner.x()
+            && self.upper_corner.x() >= envelope.lower_corner.x()
+            && self.lower_corner.y() <= envelope.upper_corner.y()
+            && self.upper_corner.y() >= envelope.lower_corner.y()
+            && self.lower_corner.z() <= envelope.upper_corner.z()
+            && self.upper_corner.z() >= envelope.lower_corner.z()
     }
 
     /// Returns a new envelope expanded by `distance` in every direction.
@@ -254,46 +291,6 @@ impl Envelope {
         )?;
 
         Envelope::new(lower_corner, upper_corner)
-    }
-
-    /// Applies a rigid-body isometry (rotation + translation) to this envelope in place.
-    ///
-    /// Both corners are transformed and the result is re-fitted as an axis-aligned bounding
-    /// box by taking per-axis minima/maxima. This keeps the AABB invariant valid after
-    /// rotation, at the cost of a potentially larger box for non-axis-aligned rotations.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use egml_core::model::geometry::{DirectPosition, Envelope};
-    /// use nalgebra::{Isometry3, Vector3};
-    ///
-    /// let lo = DirectPosition::new(0.0, 0.0, 0.0).unwrap();
-    /// let hi = DirectPosition::new(1.0, 2.0, 3.0).unwrap();
-    /// let mut env = Envelope::new(lo, hi).unwrap();
-    ///
-    /// let translation = Isometry3::translation(10.0, 0.0, 0.0);
-    /// env.apply_transform(&translation);
-    ///
-    /// assert_eq!(env.lower_corner().x(), 10.0);
-    /// assert_eq!(env.upper_corner().x(), 11.0);
-    /// ```
-    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
-        let transformed_lower_corner: Point3<f64> = m * Point3::from(self.lower_corner);
-        let transformed_upper_corner: Point3<f64> = m * Point3::from(self.upper_corner);
-
-        self.lower_corner = DirectPosition::new(
-            transformed_lower_corner.x.min(transformed_upper_corner.x),
-            transformed_lower_corner.y.min(transformed_upper_corner.y),
-            transformed_lower_corner.z.min(transformed_upper_corner.z),
-        )
-        .expect("envelope corners are finite");
-        self.upper_corner = DirectPosition::new(
-            transformed_lower_corner.x.max(transformed_upper_corner.x),
-            transformed_lower_corner.y.max(transformed_upper_corner.y),
-            transformed_lower_corner.z.max(transformed_upper_corner.z),
-        )
-        .expect("envelope corners are finite");
     }
 }
 
@@ -408,19 +405,25 @@ impl Envelope {
             vec![p100, p110, p111, p101], // right  (+x)
         ];
 
-        let members: Vec<SurfaceProperty> = face_rings
+        let members: Vec<AbstractSurfaceProperty> = face_rings
             .into_iter()
             .map(|points| {
                 let ring = LinearRing::new(points).ok()?;
-                let polygon =
-                    Polygon::new(Some(RingProperty::new(RingKind::LinearRing(ring))), vec![])
-                        .ok()?;
-                Some(SurfaceProperty::new(SurfaceKind::Polygon(polygon)))
+                let polygon = Polygon::new(
+                    Some(AbstractRingProperty::from_object(
+                        AbstractRingKind::LinearRing(ring),
+                    )),
+                    vec![],
+                )
+                .ok()?;
+                Some(AbstractSurfaceProperty::from_object(
+                    AbstractSurfaceKind::Polygon(polygon),
+                ))
             })
             .collect::<Option<_>>()
             .expect("envelope corners are finite and valid");
         let shell = Shell::new(members).expect("envelope is valid");
-        let shell_property = ShellProperty::new(shell);
+        let shell_property = ShellProperty::from_object(shell);
 
         let solid = Solid::new(Some(shell_property)).expect("envelope is valid");
         Ok(solid)
@@ -479,10 +482,14 @@ impl Envelope {
         };
 
         let ring = LinearRing::new(points).expect("envelope corners are finite and valid");
-        Polygon::new(Some(RingProperty::new(RingKind::LinearRing(ring))), vec![]).map_err(|_| {
-            Error::NotASurface {
-                non_zero_extents: self.non_zero_extents(),
-            }
+        Polygon::new(
+            Some(AbstractRingProperty::from_object(
+                AbstractRingKind::LinearRing(ring),
+            )),
+            vec![],
+        )
+        .map_err(|_| Error::NotASurface {
+            non_zero_extents: self.non_zero_extents(),
         })
     }
 
@@ -496,21 +503,157 @@ impl Envelope {
     /// Returns [`Error::NotSurfaceOrVolume`] if the envelope is a point or line segment.
     pub fn to_triangulated_surface(&self) -> Result<TriangulatedSurface, Error> {
         if self.is_surface() {
-            self.to_polygon()?.triangulate()
+            self.to_polygon()?
+                .triangulate()
+                .map(Triangulation::into_surface)
         } else if self.is_volume() {
             self.to_solid()?
                 .exterior()
                 .as_ref()
                 .expect("must be created")
-                .object
-                .as_ref()
+                .object()
                 .expect("must be created")
                 .triangulate()
+                .map(Triangulation::into_surface)
         } else {
             Err(Error::NotSurfaceOrVolume {
                 non_zero_extents: self.non_zero_extents(),
             })
         }
+    }
+}
+
+impl ApplyTransform for Envelope {
+    fn apply_transform(&mut self, transform: Transform3<f64>) {
+        let transformed_lower_corner: Point3<f64> = transform * Point3::from(self.lower_corner);
+        let transformed_upper_corner: Point3<f64> = transform * Point3::from(self.upper_corner);
+
+        self.lower_corner = DirectPosition::new(
+            transformed_lower_corner.x.min(transformed_upper_corner.x),
+            transformed_lower_corner.y.min(transformed_upper_corner.y),
+            transformed_lower_corner.z.min(transformed_upper_corner.z),
+        )
+        .expect("envelope corners are finite");
+        self.upper_corner = DirectPosition::new(
+            transformed_lower_corner.x.max(transformed_upper_corner.x),
+            transformed_lower_corner.y.max(transformed_upper_corner.y),
+            transformed_lower_corner.z.max(transformed_upper_corner.z),
+        )
+        .expect("envelope corners are finite");
+    }
+
+    /// Applies a rigid-body isometry (rotation + translation) to this envelope in place.
+    ///
+    /// Both corners are transformed and the result is re-fitted as an axis-aligned bounding
+    /// box by taking per-axis minima/maxima. This keeps the AABB invariant valid after
+    /// rotation, at the cost of a potentially larger box for non-axis-aligned rotations.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use egml_core::model::geometry::{DirectPosition, Envelope};
+    /// use nalgebra::{Isometry3, Vector3};
+    /// use crate::egml_core::model::common::ApplyTransform;
+    ///
+    /// let lo = DirectPosition::new(0.0, 0.0, 0.0).unwrap();
+    /// let hi = DirectPosition::new(1.0, 2.0, 3.0).unwrap();
+    /// let mut env = Envelope::new(lo, hi).unwrap();
+    ///
+    /// let translation = Isometry3::translation(10.0, 0.0, 0.0);
+    /// env.apply_isometry(translation);
+    ///
+    /// assert_eq!(env.lower_corner().x(), 10.0);
+    /// assert_eq!(env.upper_corner().x(), 11.0);
+    /// ```
+    fn apply_isometry(&mut self, isometry: Isometry3<f64>) {
+        let transformed_lower_corner: Point3<f64> = isometry * Point3::from(self.lower_corner);
+        let transformed_upper_corner: Point3<f64> = isometry * Point3::from(self.upper_corner);
+
+        self.lower_corner = DirectPosition::new(
+            transformed_lower_corner.x.min(transformed_upper_corner.x),
+            transformed_lower_corner.y.min(transformed_upper_corner.y),
+            transformed_lower_corner.z.min(transformed_upper_corner.z),
+        )
+        .expect("envelope corners are finite");
+        self.upper_corner = DirectPosition::new(
+            transformed_lower_corner.x.max(transformed_upper_corner.x),
+            transformed_lower_corner.y.max(transformed_upper_corner.y),
+            transformed_lower_corner.z.max(transformed_upper_corner.z),
+        )
+        .expect("envelope corners are finite");
+    }
+
+    /// Applies a pure translation to this envelope in place.
+    ///
+    /// Fast path: translation preserves per-axis ordering, so both corners can be shifted
+    /// directly with no re-fit via min/max — unlike rotation or scale, which can invalidate
+    /// the axis-aligned invariant and require re-deriving the corners.
+    fn apply_translation(&mut self, vector: Vector3<f64>) {
+        self.lower_corner = DirectPosition::new(
+            self.lower_corner.x() + vector.x,
+            self.lower_corner.y() + vector.y,
+            self.lower_corner.z() + vector.z,
+        )
+        .expect("envelope corners are finite");
+        self.upper_corner = DirectPosition::new(
+            self.upper_corner.x() + vector.x,
+            self.upper_corner.y() + vector.y,
+            self.upper_corner.z() + vector.z,
+        )
+        .expect("envelope corners are finite");
+    }
+
+    /// Applies a pure rotation (about the origin) to this envelope in place.
+    ///
+    /// Both corners are rotated and the result is re-fitted as an axis-aligned bounding box
+    /// by taking per-axis minima/maxima, same as [`apply_isometry`](Self::apply_isometry).
+    fn apply_rotation(&mut self, rotation: Rotation3<f64>) {
+        let transformed_lower_corner: Point3<f64> = rotation * Point3::from(self.lower_corner);
+        let transformed_upper_corner: Point3<f64> = rotation * Point3::from(self.upper_corner);
+
+        self.lower_corner = DirectPosition::new(
+            transformed_lower_corner.x.min(transformed_upper_corner.x),
+            transformed_lower_corner.y.min(transformed_upper_corner.y),
+            transformed_lower_corner.z.min(transformed_upper_corner.z),
+        )
+        .expect("envelope corners are finite");
+        self.upper_corner = DirectPosition::new(
+            transformed_lower_corner.x.max(transformed_upper_corner.x),
+            transformed_lower_corner.y.max(transformed_upper_corner.y),
+            transformed_lower_corner.z.max(transformed_upper_corner.z),
+        )
+        .expect("envelope corners are finite");
+    }
+
+    /// Applies a per-axis scale to this envelope in place.
+    ///
+    /// Both corners are scaled and the result is re-fitted via min/max, same as
+    /// [`apply_isometry`](Self::apply_isometry) — a negative scale factor mirrors an axis and
+    /// would otherwise leave the lower corner greater than the upper corner on that axis.
+    fn apply_scale(&mut self, scale: Scale3<f64>) {
+        let transformed_lower_corner = Point3::new(
+            self.lower_corner.x() * scale.vector.x,
+            self.lower_corner.y() * scale.vector.y,
+            self.lower_corner.z() * scale.vector.z,
+        );
+        let transformed_upper_corner = Point3::new(
+            self.upper_corner.x() * scale.vector.x,
+            self.upper_corner.y() * scale.vector.y,
+            self.upper_corner.z() * scale.vector.z,
+        );
+
+        self.lower_corner = DirectPosition::new(
+            transformed_lower_corner.x.min(transformed_upper_corner.x),
+            transformed_lower_corner.y.min(transformed_upper_corner.y),
+            transformed_lower_corner.z.min(transformed_upper_corner.z),
+        )
+        .expect("envelope corners are finite");
+        self.upper_corner = DirectPosition::new(
+            transformed_lower_corner.x.max(transformed_upper_corner.x),
+            transformed_lower_corner.y.max(transformed_upper_corner.y),
+            transformed_lower_corner.z.max(transformed_upper_corner.z),
+        )
+        .expect("envelope corners are finite");
     }
 }
 
@@ -539,6 +682,39 @@ mod tests {
 
     fn env(lx: f64, ly: f64, lz: f64, ux: f64, uy: f64, uz: f64) -> Envelope {
         Envelope::new(pos(lx, ly, lz), pos(ux, uy, uz)).unwrap()
+    }
+
+    #[test]
+    fn apply_translation_shifts_both_corners() {
+        let mut envelope = env(0.0, 0.0, 0.0, 1.0, 2.0, 3.0);
+
+        envelope.apply_translation(Vector3::new(10.0, -5.0, 1.0));
+
+        assert_eq!(envelope, env(10.0, -5.0, 1.0, 11.0, -3.0, 4.0));
+    }
+
+    #[test]
+    fn apply_rotation_refits_axis_aligned_box() {
+        use std::f64::consts::FRAC_PI_2;
+
+        let mut envelope = env(0.0, 0.0, 0.0, 1.0, 2.0, 3.0);
+
+        // 90-degree rotation about Z swaps the X and Y extents.
+        envelope.apply_rotation(Rotation3::from_euler_angles(0.0, 0.0, FRAC_PI_2));
+
+        assert!((envelope.size_x() - 2.0).abs() < 1e-10);
+        assert!((envelope.size_y() - 1.0).abs() < 1e-10);
+        assert!((envelope.size_z() - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn apply_scale_refits_on_mirroring_negative_scale() {
+        let mut envelope = env(1.0, 1.0, 1.0, 2.0, 3.0, 4.0);
+
+        // Negative X scale mirrors the box, which would otherwise leave lower.x > upper.x.
+        envelope.apply_scale(Scale3::new(-1.0, 2.0, 1.0));
+
+        assert_eq!(envelope, env(-2.0, 2.0, 1.0, -1.0, 6.0, 4.0));
     }
 
     #[test]
@@ -761,5 +937,39 @@ mod tests {
 
         assert!(envelope.contains(&point_a));
         assert!(!envelope.contains(&point_b));
+    }
+
+    #[test]
+    fn contains_envelope_partially_true_for_overlapping_boxes() {
+        let a = env(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
+        let b = env(5.0, 5.0, 5.0, 15.0, 15.0, 15.0);
+        assert!(a.contains_envelope_partially(&b));
+        assert!(b.contains_envelope_partially(&a));
+    }
+
+    #[test]
+    fn contains_envelope_partially_true_for_disjoint_boxes() {
+        let a = env(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
+        let b = env(20.0, 20.0, 20.0, 30.0, 30.0, 30.0);
+        assert!(!a.contains_envelope_partially(&b));
+        assert!(!b.contains_envelope_partially(&a));
+    }
+
+    #[test]
+    fn contains_envelope_partially_true_for_slab_crossing_with_no_corner_contained() {
+        // A thin slab passing straight through the middle of `a` along the z axis.
+        // Neither box's own min/max corner lies inside the other, so a corner-only
+        // check would wrongly report no overlap.
+        let a = env(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
+        let slab = env(-5.0, -5.0, 4.0, 15.0, 15.0, 6.0);
+        assert!(a.contains_envelope_partially(&slab));
+        assert!(slab.contains_envelope_partially(&a));
+    }
+
+    #[test]
+    fn contains_envelope_partially_true_when_touching_at_boundary() {
+        let a = env(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
+        let b = env(10.0, 10.0, 10.0, 20.0, 20.0, 20.0);
+        assert!(a.contains_envelope_partially(&b));
     }
 }

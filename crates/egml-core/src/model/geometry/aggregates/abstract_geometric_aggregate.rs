@@ -6,11 +6,17 @@ use crate::model::geometry::{AbstractGeometry, AsAbstractGeometry, AsAbstractGeo
 /// topological constraints between them.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AbstractGeometricAggregate {
-    pub(crate) abstract_geometry: AbstractGeometry,
+    pub abstract_geometry: AbstractGeometry,
 }
 
 impl AbstractGeometricAggregate {
-    pub fn new(abstract_geometry: AbstractGeometry) -> Self {
+    pub fn new() -> Self {
+        Self {
+            abstract_geometry: AbstractGeometry::default(),
+        }
+    }
+
+    pub fn from_abstract_geometry(abstract_geometry: AbstractGeometry) -> Self {
         Self { abstract_geometry }
     }
 }
@@ -41,7 +47,6 @@ impl AsAbstractGeometricAggregateMut for AbstractGeometricAggregate {
     }
 }
 
-#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_abstract_geometric_aggregate_traits {
     ($type:ty) => {
@@ -49,16 +54,26 @@ macro_rules! impl_abstract_geometric_aggregate_traits {
 
         impl $crate::model::geometry::AsAbstractGeometry for $type {
             fn abstract_geometry(&self) -> &$crate::model::geometry::AbstractGeometry {
-                &self.abstract_geometric_aggregate().abstract_geometry
+                &<$type as $crate::model::geometry::aggregates::AsAbstractGeometricAggregate>::abstract_geometric_aggregate(self)
+                    .abstract_geometry
             }
         }
+    };
+}
+
+#[macro_export]
+macro_rules! impl_abstract_geometric_aggregate_mut_traits {
+    ($type:ty) => {
+        $crate::impl_abstract_geometry_mut_traits!($type);
 
         impl $crate::model::geometry::AsAbstractGeometryMut for $type {
             fn abstract_geometry_mut(&mut self) -> &mut $crate::model::geometry::AbstractGeometry {
-                &mut self.abstract_geometric_aggregate_mut().abstract_geometry
+                &mut <$type as $crate::model::geometry::aggregates::AsAbstractGeometricAggregateMut>::abstract_geometric_aggregate_mut(self)
+                    .abstract_geometry
             }
         }
     };
 }
 
 impl_abstract_geometric_aggregate_traits!(AbstractGeometricAggregate);
+impl_abstract_geometric_aggregate_mut_traits!(AbstractGeometricAggregate);

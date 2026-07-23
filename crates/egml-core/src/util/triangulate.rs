@@ -1,7 +1,7 @@
 use crate::Error;
 use crate::model::geometry::DirectPosition;
 use crate::model::geometry::primitives::{
-    LinearRing, RingKind, RingProperty, Triangle, TriangulatedSurface,
+    AbstractRingKind, AbstractRingProperty, LinearRing, Triangle, TriangulatedSurface,
 };
 
 /// Triangulates a polygon defined by an exterior ring and optional interior (hole) rings.
@@ -19,10 +19,10 @@ use crate::model::geometry::primitives::{
 /// Currently panics (via `todo!`) if `exterior` is `None` or if non-`LinearRing`
 /// ring kinds are supplied.  These cases are not yet implemented.
 pub fn triangulate(
-    exterior: Option<RingProperty>,
-    interior: Vec<RingProperty>,
+    exterior: Option<AbstractRingProperty>,
+    interior: Vec<AbstractRingProperty>,
 ) -> Result<TriangulatedSurface, Error> {
-    let exterior = match exterior {
+    let mut exterior = match exterior {
         Some(ring) => ring,
         None => {
             todo!("triangulate polygon with no exterior ring needs to be implemented")
@@ -30,25 +30,21 @@ pub fn triangulate(
     };
 
     let exterior = match exterior
-        .object
+        .take_object()
         .expect("triangulate: exterior ring is not None")
     {
-        RingKind::LinearRing(x) => x,
+        AbstractRingKind::LinearRing(x) => x,
         _ => todo!("triangulate polygon with non-linear exterior ring needs to be implemented"),
     };
 
     let interior = interior
         .iter()
-        .map(|x| {
-            match x
-                .object
-                .as_ref()
-                .expect("triangulate: exterior ring is not None")
-            {
-                RingKind::LinearRing(x) => x.clone(),
+        .map(
+            |x| match x.object().expect("triangulate: exterior ring is not None") {
+                AbstractRingKind::LinearRing(x) => x.clone(),
                 _ => todo!("needs to be implemented"),
-            }
-        })
+            },
+        )
         .collect::<Vec<_>>();
 
     if interior.is_empty() {
@@ -60,7 +56,7 @@ pub fn triangulate(
 
 fn triangulate_without_holes(exterior: LinearRing) -> Result<TriangulatedSurface, Error> {
     if exterior.points().len() == 3 {
-        let triangle = Triangle::new_unchecked(
+        let triangle = Triangle::from_points_unchecked(
             exterior.points()[0],
             exterior.points()[1],
             exterior.points()[2],
@@ -94,7 +90,7 @@ fn triangulate_without_holes(exterior: LinearRing) -> Result<TriangulatedSurface
             let vertex_a = exterior.points()[x[0]];
             let vertex_b = exterior.points()[x[1]];
             let vertex_c = exterior.points()[x[2]];
-            Triangle::new(vertex_a, vertex_b, vertex_c).expect("should work")
+            Triangle::from_points(vertex_a, vertex_b, vertex_c).expect("should work")
         })
         .collect::<Vec<_>>();
 
@@ -144,7 +140,7 @@ fn triangulate_with_holes(
             let vertex_a = all_direct_positions[x[0]];
             let vertex_b = all_direct_positions[x[1]];
             let vertex_c = all_direct_positions[x[2]];
-            Triangle::new(vertex_a, vertex_b, vertex_c).expect("should work")
+            Triangle::from_points(vertex_a, vertex_b, vertex_c).expect("should work")
         })
         .collect::<Vec<_>>();
 
@@ -172,8 +168,8 @@ mod test {
         let result = triangulate_without_holes(linear_ring).unwrap();
 
         assert_eq!(result.patches_len(), 2);
-        assert!(result.patches().patches()[0].area_3d().unwrap() > 0.0);
-        assert!(result.patches().patches()[1].area_3d().unwrap() > 0.0);
+        assert!(result.patches().objects()[0].area_3d().unwrap() > 0.0);
+        assert!(result.patches().objects()[1].area_3d().unwrap() > 0.0);
     }
 
     #[test]

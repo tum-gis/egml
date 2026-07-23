@@ -6,7 +6,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.0.2-alpha.4"
+version = "0.0.2-alpha.5"
 authors = ["Benedikt Schwab <benedikt.schwab@gmail.com>"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -33,3 +33,6 @@ sha2 = "0.11.0"
 earcut = "0.4.10"
 libc = "0.2.186"
 cbindgen = "0.29.3"
+strum = "0.28.0"
+strum_macros = "0.28.0"
+auto_enums = "0.8.8"

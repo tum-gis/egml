@@ -1,24 +1,31 @@
-use crate::model::geometry::primitives::{
-    AbstractSurface, AsAbstractSurface, AsAbstractSurfaceMut, RingProperty, TriangulatedSurface,
+use crate::model::base::HasAssociationAttributes;
+use crate::model::common::{
+    ApplyTransform, ComputeEnvelope, IterGeometries, Triangulate, Triangulation,
 };
+use crate::model::geometry::primitives::{
+    AbstractRingProperty, AbstractSurface, AsAbstractSurface, AsAbstractSurfaceMut,
+};
+use crate::model::geometry::refs::AbstractGeometryKindRef;
 use crate::model::geometry::{DirectPosition, Envelope};
 use crate::util::plane::Plane;
 use crate::util::triangulate::triangulate;
-use crate::{Error, impl_abstract_surface_traits};
-use nalgebra::{Isometry3, Vector3};
+use crate::{
+    Error, impl_abstract_surface_mut_traits, impl_abstract_surface_traits, impl_has_geometry_type,
+};
+use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector3};
 use rayon::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Polygon {
-    pub(crate) abstract_surface: AbstractSurface,
-    exterior: Option<RingProperty>,
-    interior: Vec<RingProperty>,
+    pub abstract_surface: AbstractSurface,
+    exterior: Option<AbstractRingProperty>,
+    interior: Vec<AbstractRingProperty>,
 }
 
 impl Polygon {
     pub fn new(
-        exterior: Option<RingProperty>,
-        interior: impl IntoIterator<Item = RingProperty>,
+        exterior: Option<AbstractRingProperty>,
+        interior: impl IntoIterator<Item = AbstractRingProperty>,
     ) -> Result<Self, Error> {
         Ok(Self {
             abstract_surface: AbstractSurface::default(),
@@ -27,58 +34,75 @@ impl Polygon {
         })
     }
 
-    pub fn exterior(&self) -> Option<&RingProperty> {
+    pub fn from_abstract_surface(
+        abstract_surface: AbstractSurface,
+        exterior: Option<AbstractRingProperty>,
+        interior: impl IntoIterator<Item = AbstractRingProperty>,
+    ) -> Self {
+        Self {
+            abstract_surface,
+            exterior,
+            interior: interior.into_iter().collect(),
+        }
+    }
+
+    pub fn exterior(&self) -> Option<&AbstractRingProperty> {
         self.exterior.as_ref()
     }
 
-    pub fn set_exterior(&mut self, exterior: Option<RingProperty>) {
+    pub fn set_exterior(&mut self, exterior: AbstractRingProperty) {
+        self.exterior = Some(exterior);
+    }
+
+    pub fn set_exterior_opt(&mut self, exterior: Option<AbstractRingProperty>) {
         self.exterior = exterior;
     }
 
-    pub fn interior(&self) -> &[RingProperty] {
+    pub fn clear_exterior(&mut self) {
+        self.exterior = None;
+    }
+
+    pub fn interior(&self) -> &[AbstractRingProperty] {
         &self.interior
     }
 
-    pub fn set_interior(&mut self, interior: Vec<RingProperty>) {
+    pub fn set_interior(&mut self, interior: Vec<AbstractRingProperty>) {
         self.interior = interior;
     }
 
-    pub fn push_interior(&mut self, ring: RingProperty) {
+    pub fn push_interior(&mut self, ring: AbstractRingProperty) {
         self.interior.push(ring);
     }
 
-    pub fn extend_interiors(&mut self, rings: impl IntoIterator<Item = RingProperty>) {
+    pub fn extend_interiors(&mut self, rings: impl IntoIterator<Item = AbstractRingProperty>) {
         self.interior.extend(rings);
     }
 }
 
-impl Polygon {
-    pub fn compute_envelope(&self) -> Option<Envelope> {
-        if let Some(exterior) = &self.exterior
-            && let Some(object) = exterior.object.as_ref()
-            && let e = object.compute_envelope()
-        {
-            return Some(e);
-        }
-
-        let envelopes = self
-            .interior
-            .iter()
-            .filter_map(|x| x.object.as_ref())
-            .map(|x| x.compute_envelope())
-            .collect::<Vec<_>>();
-
-        Envelope::from_envelopes(&envelopes)
+impl AsAbstractSurface for Polygon {
+    fn abstract_surface(&self) -> &AbstractSurface {
+        &self.abstract_surface
     }
+}
 
+impl AsAbstractSurfaceMut for Polygon {
+    fn abstract_surface_mut(&mut self) -> &mut AbstractSurface {
+        &mut self.abstract_surface
+    }
+}
+
+impl_abstract_surface_traits!(Polygon);
+impl_abstract_surface_mut_traits!(Polygon);
+impl_has_geometry_type!(Polygon, Polygon);
+
+impl Polygon {
     ///
     /// See also <https://www.khronos.org/opengl/wiki/Calculating_a_Surface_Normal#Newell.27s_Method>
     fn normal(&self) -> Vector3<f64> {
         let mut enclosed_boundary_points = self
             .exterior()
             .expect("should be there")
-            .object
-            .as_ref()
+            .object()
             .expect("should be there")
             .points()
             .to_vec();
@@ -115,10 +139,9 @@ impl Polygon {
     pub fn area_3d(&self) -> Result<f64, Error> {
         let exterior_ring = self.exterior.as_ref().ok_or(Error::MissingExteriorRing)?;
         let exterior = exterior_ring
-            .object
-            .as_ref()
+            .object()
             .ok_or_else(|| Error::UnresolvedRingReference {
-                href: exterior_ring.href.clone(),
+                href: exterior_ring.href().map(|h| h.to_string()),
             })?
             .area_3d();
 
@@ -126,10 +149,9 @@ impl Polygon {
             .interior
             .iter()
             .map(|r| {
-                r.object
-                    .as_ref()
+                r.object()
                     .ok_or_else(|| Error::UnresolvedRingReference {
-                        href: r.href.clone(),
+                        href: r.href().map(|h| h.to_string()),
                     })
                     .map(|ring| ring.area_3d())
             })
@@ -140,61 +162,149 @@ impl Polygon {
         Ok(exterior - holes)
     }
 
-    pub fn triangulate(&self) -> Result<TriangulatedSurface, Error> {
-        triangulate(self.exterior.clone(), self.interior.to_vec())
-    }
-
     pub fn points(&self) -> Vec<&DirectPosition> {
         let mut all_points = Vec::new();
         if let Some(exterior) = &self.exterior
-            && let Some(object) = exterior.object.as_ref()
+            && let Some(object) = exterior.object()
         {
             all_points.extend(object.points());
         }
 
         for ring in &self.interior {
-            if let Some(object) = ring.object.as_ref() {
+            if let Some(object) = ring.object() {
                 all_points.extend(object.points());
             }
         }
 
         all_points
     }
+}
 
-    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
+impl ApplyTransform for Polygon {
+    fn apply_transform(&mut self, transform: Transform3<f64>) {
         if let Some(exterior) = &mut self.exterior
-            && let Some(object) = exterior.object.as_mut()
+            && let Some(object) = exterior.object_mut()
         {
-            object.apply_transform(m);
+            object.apply_transform(transform);
         }
 
         self.interior.par_iter_mut().for_each(|p| {
-            if let Some(object) = p.object.as_mut() {
-                object.apply_transform(m);
+            if let Some(object) = p.object_mut() {
+                object.apply_transform(transform);
+            }
+        });
+    }
+
+    fn apply_isometry(&mut self, isometry: Isometry3<f64>) {
+        if let Some(exterior) = &mut self.exterior
+            && let Some(object) = exterior.object_mut()
+        {
+            object.apply_isometry(isometry);
+        }
+
+        self.interior.par_iter_mut().for_each(|p| {
+            if let Some(object) = p.object_mut() {
+                object.apply_isometry(isometry);
+            }
+        });
+    }
+
+    fn apply_translation(&mut self, vector: Vector3<f64>) {
+        if let Some(exterior) = &mut self.exterior
+            && let Some(object) = exterior.object_mut()
+        {
+            object.apply_translation(vector);
+        }
+
+        self.interior.par_iter_mut().for_each(|p| {
+            if let Some(object) = p.object_mut() {
+                object.apply_translation(vector);
+            }
+        });
+    }
+
+    fn apply_rotation(&mut self, rotation: Rotation3<f64>) {
+        if let Some(exterior) = &mut self.exterior
+            && let Some(object) = exterior.object_mut()
+        {
+            object.apply_rotation(rotation);
+        }
+
+        self.interior.par_iter_mut().for_each(|p| {
+            if let Some(object) = p.object_mut() {
+                object.apply_rotation(rotation);
+            }
+        });
+    }
+
+    fn apply_scale(&mut self, scale: Scale3<f64>) {
+        if let Some(exterior) = &mut self.exterior
+            && let Some(object) = exterior.object_mut()
+        {
+            object.apply_scale(scale);
+        }
+
+        self.interior.par_iter_mut().for_each(|p| {
+            if let Some(object) = p.object_mut() {
+                object.apply_scale(scale);
             }
         });
     }
 }
 
-impl AsAbstractSurface for Polygon {
-    fn abstract_surface(&self) -> &AbstractSurface {
-        &self.abstract_surface
+impl ComputeEnvelope for Polygon {
+    fn compute_envelope(&self) -> Option<Envelope> {
+        if let Some(exterior) = &self.exterior
+            && let Some(object) = exterior.object()
+            && let Some(e) = object.compute_envelope()
+        {
+            return Some(e);
+        }
+
+        let envelopes = self
+            .interior
+            .iter()
+            .filter_map(|x| x.object())
+            .filter_map(|x| x.compute_envelope())
+            .collect::<Vec<_>>();
+
+        Envelope::from_envelopes(&envelopes)
     }
 }
 
-impl AsAbstractSurfaceMut for Polygon {
-    fn abstract_surface_mut(&mut self) -> &mut AbstractSurface {
-        &mut self.abstract_surface
+impl Triangulate for Polygon {
+    fn triangulate(&self) -> Result<Triangulation, Error> {
+        let surface = triangulate(self.exterior.clone(), self.interior.to_vec())?;
+        Ok(Triangulation::new(surface, Vec::new()))
     }
 }
 
-impl_abstract_surface_traits!(Polygon);
+impl IterGeometries for Polygon {
+    fn iter_geometries(&self) -> Box<dyn Iterator<Item = AbstractGeometryKindRef<'_>> + '_> {
+        Box::new(
+            std::iter::once(self.into())
+                .chain(
+                    self.exterior
+                        .as_ref()
+                        .and_then(|x| x.object())
+                        .into_iter()
+                        .flat_map(|x| x.iter_geometries()),
+                )
+                .chain(
+                    self.interior
+                        .iter()
+                        .filter_map(|x| x.object())
+                        .flat_map(|x| x.iter_geometries()),
+                ),
+        )
+    }
+}
 
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::model::geometry::DirectPosition;
-    use crate::model::geometry::primitives::{AsSurface, LinearRing, RingKind};
+    use crate::model::geometry::primitives::{AbstractRingKind, AsSurface, LinearRing};
     use nalgebra::Vector3;
 
     #[test]
@@ -206,8 +316,13 @@ mod test {
             DirectPosition::new(0.0, 1.0, 1.0).unwrap(),
         ])
         .unwrap();
-        let polygon =
-            Polygon::new(Some(RingProperty::new(RingKind::LinearRing(ring))), []).unwrap();
+        let polygon = Polygon::new(
+            Some(AbstractRingProperty::from_object(
+                AbstractRingKind::LinearRing(ring),
+            )),
+            [],
+        )
+        .unwrap();
         assert!((polygon.area_3d().expect("has exterior ring") - 1.0).abs() < 1e-10);
     }
 
@@ -229,8 +344,12 @@ mod test {
         ])
         .unwrap();
         let polygon = Polygon::new(
-            Some(RingProperty::new(RingKind::LinearRing(exterior))),
-            vec![RingProperty::new(RingKind::LinearRing(hole))],
+            Some(AbstractRingProperty::from_object(
+                AbstractRingKind::LinearRing(exterior),
+            )),
+            vec![AbstractRingProperty::from_object(
+                AbstractRingKind::LinearRing(hole),
+            )],
         )
         .unwrap();
         assert!((polygon.area_3d().expect("has exterior ring") - 15.0).abs() < 1e-10);
@@ -244,7 +363,7 @@ mod test {
 
     #[test]
     fn area_3d_unresolved_exterior_ring() {
-        let exterior = RingProperty::new_href("urn:example:ring-1");
+        let exterior = AbstractRingProperty::from_href("urn:example:ring-1".into());
         let polygon = Polygon::new(Some(exterior), []).unwrap();
         assert_eq!(
             polygon.area_3d(),
@@ -263,9 +382,11 @@ mod test {
             DirectPosition::new(0.0, 4.0, 0.0).unwrap(),
         ])
         .unwrap();
-        let hole = RingProperty::new_href("urn:example:hole-1");
+        let hole = AbstractRingProperty::from_href("urn:example:hole-1".into());
         let polygon = Polygon::new(
-            Some(RingProperty::new(RingKind::LinearRing(exterior))),
+            Some(AbstractRingProperty::from_object(
+                AbstractRingKind::LinearRing(exterior),
+            )),
             vec![hole],
         )
         .unwrap();
@@ -284,7 +405,8 @@ mod test {
         let point_c = DirectPosition::new(1.0, 1.0, 1.0).unwrap();
         let point_d = DirectPosition::new(0.0, 1.0, 1.0).unwrap();
         let linear_ring = LinearRing::new([point_a, point_b, point_c, point_d]).unwrap();
-        let linear_ring = RingProperty::new(RingKind::LinearRing(linear_ring));
+        let linear_ring =
+            AbstractRingProperty::from_object(AbstractRingKind::LinearRing(linear_ring));
         let polygon = Polygon::new(Some(linear_ring), []).unwrap();
         let normal = polygon.normal();
 
@@ -298,7 +420,8 @@ mod test {
         let point_c = DirectPosition::new(1.0, 1.0, 1.0).unwrap();
         let point_d = DirectPosition::new(0.0, 1.0, 1.0).unwrap();
         let linear_ring = LinearRing::new([point_a, point_b, point_c, point_d]).unwrap();
-        let linear_ring = RingProperty::new(RingKind::LinearRing(linear_ring));
+        let linear_ring =
+            AbstractRingProperty::from_object(AbstractRingKind::LinearRing(linear_ring));
         let polygon = Polygon::new(Some(linear_ring), []).unwrap();
         let plane_equation = polygon.plane_equation();
 
@@ -318,11 +441,12 @@ mod test {
             DirectPosition::new(0.0, 1.0, 2.0).expect("should work"),
         ])
         .expect("should work");
-        let linear_ring_exterior = RingProperty::new(RingKind::LinearRing(linear_ring_exterior));
+        let linear_ring_exterior =
+            AbstractRingProperty::from_object(AbstractRingKind::LinearRing(linear_ring_exterior));
 
         let polygon = Polygon::new(Some(linear_ring_exterior), vec![]).expect("should work");
-        let triangulated_surface = polygon.triangulate().expect("should work");
-        assert_eq!(triangulated_surface.patches_len(), 2);
+        let triangulation = polygon.triangulate().expect("should work");
+        assert_eq!(triangulation.surface().patches_len(), 2);
     }
 
     #[test]
@@ -336,7 +460,8 @@ mod test {
             DirectPosition::new(0.0, 1.0, 5.0).expect("should work"),
         ])
         .expect("should work");
-        let linear_ring_exterior = RingProperty::new(RingKind::LinearRing(linear_ring_exterior));
+        let linear_ring_exterior =
+            AbstractRingProperty::from_object(AbstractRingKind::LinearRing(linear_ring_exterior));
 
         let linear_ring_interior = LinearRing::new([
             DirectPosition::new(0.5, 0.0, 0.0).expect("should work"),
@@ -345,14 +470,15 @@ mod test {
             DirectPosition::new(0.5, 1.0, 2.0).expect("should work"),
         ])
         .expect("should work");
-        let linear_ring_interior = RingProperty::new(RingKind::LinearRing(linear_ring_interior));
+        let linear_ring_interior =
+            AbstractRingProperty::from_object(AbstractRingKind::LinearRing(linear_ring_interior));
 
         let polygon = Polygon::new(
             Some(linear_ring_exterior),
             vec![linear_ring_interior.clone(), linear_ring_interior.clone()],
         )
         .expect("should work");
-        let triangulated_surface = polygon.triangulate().expect("should work");
-        // assert_eq!(triangulated_surface.patches_len(), 2);
+        let triangulation = polygon.triangulate().expect("should work");
+        // assert_eq!(triangulation.surface().patches_len(), 2);
     }
 }

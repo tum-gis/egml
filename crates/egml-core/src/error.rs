@@ -26,6 +26,18 @@ pub enum Error {
         detail: Option<String>,
     },
 
+    /// Returned when a collection has a number of elements other than the exact
+    /// count required by the GML geometry constraint.
+    ///
+    /// `expected` is the required count; `actual` is what was supplied.
+    /// `spec` optionally cites the ISO/OGC clause that mandates the count.
+    InvalidElementCount {
+        geometry: &'static str,
+        expected: usize,
+        actual: usize,
+        spec: Option<&'static str>,
+    },
+
     /// Returned when two positions that must be distinct are identical.
     ///
     /// Applies to [`Triangle`](crate::model::geometry::primitives::Triangle)
@@ -84,6 +96,9 @@ pub enum Error {
     /// `non_zero_extents` is the actual number of axes with non-zero extent.
     NotAVolume { non_zero_extents: u8 },
 
+    /// Returned when an empty string is used to construct a [`Id`](crate::model::base::Id).
+    EmptyId,
+
     /// Returned when the earcut polygon triangulation algorithm produces no triangles.
     ///
     /// `context` provides additional information about which polygon or patch
@@ -123,6 +138,23 @@ pub enum Error {
     /// `href` is the reference value if one was present, or `None` if the property
     /// has neither an inline object nor a reference.
     UnresolvedShellReference { href: Option<String> },
+
+    /// Returned when `triangulate` is called on a geometry type that cannot
+    /// produce a surface (e.g. `Point`, `MultiCurve`).
+    ///
+    /// `geometry` names the concrete variant that was encountered.
+    TriangulationNotSupported { geometry: &'static str },
+
+    /// Returned when an attribute held a value that could not be parsed into
+    /// its expected type (e.g. an `xlink:show`/`xlink:actuate` value outside
+    /// the enumeration defined by the XLink specification).
+    ///
+    /// `attribute` names the attribute (e.g. `"xlink:show"`); `value` is the
+    /// raw string that was supplied.
+    InvalidAttributeValue {
+        attribute: &'static str,
+        value: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -149,6 +181,21 @@ impl fmt::Display for Error {
                 }
                 if let Some(d) = detail {
                     write!(f, ": {d}")?;
+                }
+                Ok(())
+            }
+            Error::InvalidElementCount {
+                geometry,
+                expected,
+                actual,
+                spec,
+            } => {
+                write!(
+                    f,
+                    "{geometry} requires exactly {expected} element(s), got {actual}"
+                )?;
+                if let Some(s) = spec {
+                    write!(f, " ({s})")?;
                 }
                 Ok(())
             }
@@ -188,6 +235,7 @@ impl fmt::Display for Error {
                 "envelope has {non_zero_extents} non-zero extent(s); \
                  to_solid requires all 3 to be non-zero"
             ),
+            Error::EmptyId => write!(f, "gml:id must not be empty"),
             Error::TriangulationFailed { context } => {
                 write!(f, "polygon triangulation (earcut) failed: {context}")
             }
@@ -233,6 +281,13 @@ impl fmt::Display for Error {
                 f,
                 "shell property has neither an inline object nor an xlink:href reference"
             ),
+            Error::TriangulationNotSupported { geometry } => write!(
+                f,
+                "triangulation is not supported for geometry type '{geometry}'"
+            ),
+            Error::InvalidAttributeValue { attribute, value } => {
+                write!(f, "invalid value '{value}' for attribute '{attribute}'")
+            }
         }
     }
 }

@@ -29,17 +29,9 @@
 //! XLink references (`xlink:href`) are not yet resolved; attempting to parse a
 //! document that uses them returns [`Error::UnsupportedXLink`].
 
-mod base;
-mod basic;
+pub mod codec;
 mod error;
-mod feature;
-mod geometry;
-mod util;
-
-pub use crate::base::*;
-pub use crate::basic::*;
-pub use crate::feature::*;
-pub use crate::geometry::*;
+pub mod util;
 
 #[doc(inline)]
 pub use crate::error::Error;

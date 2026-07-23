@@ -6,7 +6,9 @@
 //! GML application schemas.
 
 mod abstract_feature;
+mod abstract_feature_kind;
 mod bounding_shape;
 
-pub use self::abstract_feature::*;
-pub use self::bounding_shape::*;
+pub use abstract_feature::*;
+pub use abstract_feature_kind::*;
+pub use bounding_shape::*;

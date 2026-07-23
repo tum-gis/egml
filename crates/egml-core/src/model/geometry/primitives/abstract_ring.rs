@@ -1,15 +1,22 @@
 use crate::model::geometry::primitives::{AbstractCurve, AsAbstractCurve, AsAbstractCurveMut};
+
 /// Base data shared by all GML ring geometry types ([OGC 07-036 §10.5.6](https://docs.ogc.org/is/07-036/07-036.pdf)).
 ///
 /// A ring is a closed curve used as the boundary of a surface patch.
 /// The only concrete ring type currently implemented is [`LinearRing`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AbstractRing {
-    pub(crate) abstract_curve: AbstractCurve,
+    pub abstract_curve: AbstractCurve,
 }
 
 impl AbstractRing {
-    pub fn new(abstract_curve: AbstractCurve) -> Self {
+    pub fn new() -> Self {
+        Self {
+            abstract_curve: AbstractCurve::default(),
+        }
+    }
+
+    pub fn from_abstract_curve(abstract_curve: AbstractCurve) -> Self {
         Self { abstract_curve }
     }
 }
@@ -38,7 +45,6 @@ impl AsAbstractRingMut for AbstractRing {
     }
 }
 
-#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_abstract_ring_traits {
     ($type:ty) => {
@@ -46,20 +52,28 @@ macro_rules! impl_abstract_ring_traits {
 
         impl $crate::model::geometry::primitives::AsAbstractCurve for $type {
             fn abstract_curve(&self) -> &$crate::model::geometry::primitives::AbstractCurve {
-                use $crate::model::geometry::primitives::AsAbstractRing;
-                &self.abstract_ring().abstract_curve
+                &<$type as $crate::model::geometry::primitives::AsAbstractRing>::abstract_ring(self)
+                    .abstract_curve
             }
         }
+    };
+}
+
+#[macro_export]
+macro_rules! impl_abstract_ring_mut_traits {
+    ($type:ty) => {
+        $crate::impl_abstract_curve_mut_traits!($type);
 
         impl $crate::model::geometry::primitives::AsAbstractCurveMut for $type {
             fn abstract_curve_mut(
                 &mut self,
             ) -> &mut $crate::model::geometry::primitives::AbstractCurve {
-                use $crate::model::geometry::primitives::AsAbstractRingMut;
-                &mut self.abstract_ring_mut().abstract_curve
+                &mut <$type as $crate::model::geometry::primitives::AsAbstractRingMut>::abstract_ring_mut(self)
+                    .abstract_curve
             }
         }
     };
 }
 
 impl_abstract_ring_traits!(AbstractRing);
+impl_abstract_ring_mut_traits!(AbstractRing);

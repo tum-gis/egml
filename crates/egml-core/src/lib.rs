@@ -9,7 +9,7 @@
 //! | Module | Contents |
 //! |--------|----------|
 //! | [`model::base`] | Root GML types: [`AbstractGml`](model::base::AbstractGml), [`Id`](model::base::Id) |
-//! | [`model::basic`] | Primitive GML scalar types: [`Code`](model::basic::Code), [`Measure`](model::basic::Measure) |
+//! | [`model::basic_types`] | Primitive GML scalar types: [`Code`](model::basic_types::Code), [`Measure`](model::basic_types::Measure) |
 //! | [`model::feature`] | Abstract GML feature class |
 //! | [`model::geometry`] | Full geometry hierarchy: primitives, aggregates, and complexes |
 //! | [`util::plane`] | Plane in R³ — point + unit normal |
@@ -50,11 +50,8 @@
 
 mod error;
 pub mod model;
-mod ops;
+pub mod resolver;
 pub mod util;
 
 #[doc(inline)]
 pub use error::Error;
-
-#[doc(inline)]
-pub use ops::distance;

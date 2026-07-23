@@ -1,10 +1,16 @@
+use crate::model::base::HasAssociationAttributes;
+use crate::model::common::{ApplyTransform, ComputeEnvelope, IterGeometries};
 use crate::model::geometry::Envelope;
 use crate::model::geometry::aggregates::{
     AbstractGeometricAggregate, AsAbstractGeometricAggregate, AsAbstractGeometricAggregateMut,
 };
-use crate::model::geometry::primitives::CurveProperty;
-use crate::{Error, impl_abstract_geometric_aggregate_traits};
-use nalgebra::Isometry3;
+use crate::model::geometry::primitives::AbstractCurveProperty;
+use crate::model::geometry::refs::AbstractGeometryKindRef;
+use crate::{
+    Error, impl_abstract_geometric_aggregate_mut_traits, impl_abstract_geometric_aggregate_traits,
+    impl_has_geometry_type,
+};
+use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector3};
 use rayon::iter::IntoParallelRefMutIterator;
 use rayon::iter::ParallelIterator;
 
@@ -13,8 +19,8 @@ use rayon::iter::ParallelIterator;
 /// Corresponds to `gml:MultiCurve` in [OGC 07-036 §11.3.3.1](https://docs.ogc.org/is/07-036/07-036.pdf).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MultiCurve {
-    pub(crate) abstract_geometric_aggregate: AbstractGeometricAggregate,
-    curve_member: Vec<CurveProperty>,
+    pub abstract_geometric_aggregate: AbstractGeometricAggregate,
+    curve_member: Vec<AbstractCurveProperty>,
 }
 
 impl MultiCurve {
@@ -23,8 +29,30 @@ impl MultiCurve {
     /// # Errors
     ///
     /// Returns [`Error::TooFewElements`] if `members` is empty.
-    pub fn new(members: impl IntoIterator<Item = CurveProperty>) -> Result<Self, Error> {
-        let members: Vec<CurveProperty> = members.into_iter().collect();
+    pub fn new(members: impl IntoIterator<Item = AbstractCurveProperty>) -> Result<Self, Error> {
+        let members: Vec<AbstractCurveProperty> = members.into_iter().collect();
+        Self::validate(&members)?;
+
+        Ok(Self {
+            abstract_geometric_aggregate: AbstractGeometricAggregate::default(),
+            curve_member: members,
+        })
+    }
+
+    pub fn from_abstract_geometric_aggregate(
+        abstract_geometric_aggregate: AbstractGeometricAggregate,
+        members: impl IntoIterator<Item = AbstractCurveProperty>,
+    ) -> Result<Self, Error> {
+        let members: Vec<AbstractCurveProperty> = members.into_iter().collect();
+        Self::validate(&members)?;
+
+        Ok(Self {
+            abstract_geometric_aggregate,
+            curve_member: members,
+        })
+    }
+
+    fn validate(members: &[AbstractCurveProperty]) -> Result<(), Error> {
         if members.is_empty() {
             return Err(Error::TooFewElements {
                 geometry: "gml:MultiCurve",
@@ -34,15 +62,11 @@ impl MultiCurve {
                 detail: None,
             });
         }
-
-        Ok(Self {
-            abstract_geometric_aggregate: AbstractGeometricAggregate::default(),
-            curve_member: members,
-        })
+        Ok(())
     }
 
     /// Returns the curve members as a slice.
-    pub fn curve_member(&self) -> &[CurveProperty] {
+    pub fn curve_member(&self) -> &[AbstractCurveProperty] {
         &self.curve_member
     }
 
@@ -51,25 +75,20 @@ impl MultiCurve {
     /// # Errors
     ///
     /// Returns [`Error::TooFewElements`] if `val` is empty.
-    pub fn set_curve_member(&mut self, val: Vec<CurveProperty>) -> Result<(), Error> {
-        if val.is_empty() {
-            return Err(Error::TooFewElements {
-                geometry: "gml:MultiCurve",
-                minimum: 1,
-                spec: Some("OGC 07-036 §11.3.3.1"),
-                id: None,
-                detail: None,
-            });
-        }
+    pub fn set_curve_member(&mut self, val: Vec<AbstractCurveProperty>) -> Result<(), Error> {
+        Self::validate(&val)?;
         self.curve_member = val;
         Ok(())
     }
 
-    pub fn push_curve_member(&mut self, member: CurveProperty) {
+    pub fn push_curve_member(&mut self, member: AbstractCurveProperty) {
         self.curve_member.push(member);
     }
 
-    pub fn extend_curve_members(&mut self, members: impl IntoIterator<Item = CurveProperty>) {
+    pub fn extend_curve_members(
+        &mut self,
+        members: impl IntoIterator<Item = AbstractCurveProperty>,
+    ) {
         self.curve_member.extend(members);
     }
 }
@@ -85,32 +104,67 @@ impl MultiCurve {
         self.curve_member
             .iter()
             .map(|c| {
-                c.object
-                    .as_ref()
+                c.object()
                     .ok_or_else(|| Error::UnresolvedCurveReference {
-                        href: c.href.clone(),
+                        href: c.href().as_ref().map(|h| h.to_string()),
                     })
                     .map(|curve| curve.length_3d())
             })
             .collect::<Result<Vec<f64>, Error>>()
             .map(|lengths| lengths.into_iter().sum())
     }
+}
 
-    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
+impl ApplyTransform for MultiCurve {
+    fn apply_transform(&mut self, transform: Transform3<f64>) {
         self.curve_member.par_iter_mut().for_each(|p| {
-            if let Some(object) = &mut p.object {
-                object.apply_transform(m);
+            if let Some(object) = p.object_mut() {
+                object.apply_transform(transform);
             }
         });
     }
 
+    fn apply_isometry(&mut self, isometry: Isometry3<f64>) {
+        self.curve_member.par_iter_mut().for_each(|p| {
+            if let Some(object) = p.object_mut() {
+                object.apply_isometry(isometry);
+            }
+        });
+    }
+
+    fn apply_translation(&mut self, vector: Vector3<f64>) {
+        self.curve_member.par_iter_mut().for_each(|p| {
+            if let Some(object) = p.object_mut() {
+                object.apply_translation(vector);
+            }
+        });
+    }
+
+    fn apply_rotation(&mut self, rotation: Rotation3<f64>) {
+        self.curve_member.par_iter_mut().for_each(|p| {
+            if let Some(object) = p.object_mut() {
+                object.apply_rotation(rotation);
+            }
+        });
+    }
+
+    fn apply_scale(&mut self, scale: Scale3<f64>) {
+        self.curve_member.par_iter_mut().for_each(|p| {
+            if let Some(object) = p.object_mut() {
+                object.apply_scale(scale);
+            }
+        });
+    }
+}
+
+impl ComputeEnvelope for MultiCurve {
     /// Returns the union of the bounding boxes of all curve members.
-    pub fn compute_envelope(&self) -> Option<Envelope> {
+    fn compute_envelope(&self) -> Option<Envelope> {
         let envelopes: Vec<Envelope> = self
             .curve_member
             .iter()
-            .flat_map(|x| x.object.as_ref())
-            .map(|x| x.compute_envelope())
+            .flat_map(|x| x.object())
+            .filter_map(|x| x.compute_envelope())
             .collect();
 
         Envelope::from_envelopes(&envelopes)
@@ -130,16 +184,33 @@ impl AsAbstractGeometricAggregateMut for MultiCurve {
 }
 
 impl_abstract_geometric_aggregate_traits!(MultiCurve);
+impl_abstract_geometric_aggregate_mut_traits!(MultiCurve);
+impl_has_geometry_type!(MultiCurve, MultiCurve);
+
+impl IterGeometries for MultiCurve {
+    fn iter_geometries(&self) -> Box<dyn Iterator<Item = AbstractGeometryKindRef<'_>> + '_> {
+        Box::new(
+            std::iter::once(self.into()).chain(
+                self.curve_member
+                    .iter()
+                    .filter_map(|x| x.object())
+                    .flat_map(|x| x.iter_geometries()),
+            ),
+        )
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Error;
     use crate::model::geometry::DirectPosition;
-    use crate::model::geometry::primitives::{CurveKind, LineString};
+    use crate::model::geometry::primitives::{AbstractCurveKind, LineString};
 
-    fn line_string(points: Vec<DirectPosition>) -> CurveProperty {
-        CurveProperty::new(CurveKind::LineString(LineString::new(points).unwrap()))
+    fn line_string(points: Vec<DirectPosition>) -> AbstractCurveProperty {
+        AbstractCurveProperty::from_object(AbstractCurveKind::LineString(
+            LineString::new(points).unwrap(),
+        ))
     }
 
     #[test]
@@ -161,8 +232,10 @@ mod tests {
 
     #[test]
     fn length_3d_unresolved_curve_reference() {
-        let multi_curve =
-            MultiCurve::new([CurveProperty::new_href("urn:example:curve-1")]).unwrap();
+        let multi_curve = MultiCurve::new([AbstractCurveProperty::from_href(
+            "urn:example:curve-1".into(),
+        )])
+        .unwrap();
         assert_eq!(
             multi_curve.length_3d(),
             Err(Error::UnresolvedCurveReference {

@@ -27,14 +27,21 @@
 //! ```
 
 mod abstract_geometry;
+mod abstract_geometry_array_property;
+mod abstract_geometry_kind;
+mod abstract_geometry_property;
 pub mod aggregates;
 pub mod complexes;
 mod direct_position;
 mod direct_position_list;
 mod envelope;
 pub mod primitives;
+pub mod refs;
 
 pub use self::abstract_geometry::*;
+pub use self::abstract_geometry_array_property::*;
+pub use self::abstract_geometry_kind::*;
+pub use self::abstract_geometry_property::*;
 pub use self::direct_position::*;
 pub use self::direct_position_list::*;
 pub use self::envelope::*;

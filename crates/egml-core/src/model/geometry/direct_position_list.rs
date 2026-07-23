@@ -1,7 +1,6 @@
 #[derive(Debug, PartialEq, Clone)]
 pub struct DirectPositionList {
     srs_dimension: Option<u32>,
-
     values: Vec<f64>,
 }
 
@@ -21,8 +20,16 @@ impl DirectPositionList {
         self.srs_dimension
     }
 
-    pub fn set_srs_dimension(&mut self, val: Option<u32>) {
+    pub fn set_srs_dimension(&mut self, val: u32) {
+        self.srs_dimension = Some(val);
+    }
+
+    pub fn set_srs_dimension_opt(&mut self, val: Option<u32>) {
         self.srs_dimension = val;
+    }
+
+    pub fn clear_srs_dimension(&mut self) {
+        self.srs_dimension = None;
     }
 
     pub fn push_value(&mut self, value: f64) {

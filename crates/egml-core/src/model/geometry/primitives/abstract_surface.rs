@@ -7,11 +7,19 @@ use crate::model::geometry::primitives::{
 /// [`Polygon`], [`Surface`], and [`CompositeSurface`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AbstractSurface {
-    pub(crate) abstract_geometric_primitive: AbstractGeometricPrimitive,
+    pub abstract_geometric_primitive: AbstractGeometricPrimitive,
 }
 
 impl AbstractSurface {
     pub fn new(abstract_geometric_primitive: AbstractGeometricPrimitive) -> Self {
+        Self {
+            abstract_geometric_primitive,
+        }
+    }
+
+    pub fn from_abstract_geometric_primitive(
+        abstract_geometric_primitive: AbstractGeometricPrimitive,
+    ) -> Self {
         Self {
             abstract_geometric_primitive,
         }
@@ -42,7 +50,6 @@ impl AsAbstractSurfaceMut for AbstractSurface {
     }
 }
 
-#[doc(hidden)]
 #[macro_export]
 macro_rules! impl_abstract_surface_traits {
     ($type:ty) => {
@@ -52,20 +59,28 @@ macro_rules! impl_abstract_surface_traits {
             fn abstract_geometric_primitive(
                 &self,
             ) -> &$crate::model::geometry::primitives::AbstractGeometricPrimitive {
-                use $crate::model::geometry::primitives::AsAbstractSurface;
-                &self.abstract_surface().abstract_geometric_primitive
+                &<$type as $crate::model::geometry::primitives::AsAbstractSurface>::abstract_surface(self)
+                    .abstract_geometric_primitive
             }
         }
+    };
+}
+
+#[macro_export]
+macro_rules! impl_abstract_surface_mut_traits {
+    ($type:ty) => {
+        $crate::impl_abstract_geometric_primitive_mut_traits!($type);
 
         impl $crate::model::geometry::primitives::AsAbstractGeometricPrimitiveMut for $type {
             fn abstract_geometric_primitive_mut(
                 &mut self,
             ) -> &mut $crate::model::geometry::primitives::AbstractGeometricPrimitive {
-                use $crate::model::geometry::primitives::AsAbstractSurfaceMut;
-                &mut self.abstract_surface_mut().abstract_geometric_primitive
+                &mut <$type as $crate::model::geometry::primitives::AsAbstractSurfaceMut>::abstract_surface_mut(self)
+                    .abstract_geometric_primitive
             }
         }
     };
 }
 
 impl_abstract_surface_traits!(AbstractSurface);
+impl_abstract_surface_mut_traits!(AbstractSurface);

@@ -1,5 +1,5 @@
 use crate::error::Error;
-use nalgebra::{Isometry3, Point3};
+use nalgebra::{Isometry3, Point3, Rotation3, Scale3, Transform3, Vector3};
 use std::fmt;
 
 /// A 3-D coordinate triple in a coordinate reference system (CRS).
@@ -54,6 +54,10 @@ impl DirectPosition {
         }
 
         Ok(Self { x, y, z })
+    }
+
+    pub fn new_unchecked(x: f64, y: f64, z: f64) -> Self {
+        Self { x, y, z }
     }
 
     /// Returns the X coordinate.
@@ -131,16 +135,59 @@ impl DirectPosition {
     pub fn points(&self) -> Vec<&DirectPosition> {
         vec![self]
     }
+}
 
+impl DirectPosition {
     /// Applies a rigid-body transform (rotation + translation) to this position in place.
     ///
     /// `m` is a [`nalgebra::Isometry3`] — a combination of a rotation and a translation
     /// that preserves distances and angles.
-    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
-        let p: Point3<f64> = m * Point3::new(self.x, self.y, self.z);
+    pub fn apply_transform(&mut self, transform: Transform3<f64>) {
+        let p: Point3<f64> = transform * Point3::new(self.x, self.y, self.z);
         self.x = p.x;
         self.y = p.y;
         self.z = p.z;
+    }
+
+    /// Applies a rigid-body transform (rotation + translation) to this position in place.
+    ///
+    /// Fast path: rotates and translates directly via [`nalgebra::Isometry3`] instead of
+    /// going through a full homogeneous [`Transform3`] multiply.
+    pub fn apply_isometry(&mut self, isometry: Isometry3<f64>) {
+        let p: Point3<f64> = isometry * Point3::new(self.x, self.y, self.z);
+        self.x = p.x;
+        self.y = p.y;
+        self.z = p.z;
+    }
+
+    /// Applies a pure translation to this position in place.
+    ///
+    /// Fast path: a plain component-wise add, with no rotation or matrix math at all.
+    pub fn apply_translation(&mut self, vector: Vector3<f64>) {
+        self.x += vector.x;
+        self.y += vector.y;
+        self.z += vector.z;
+    }
+
+    /// Applies a pure rotation (about the origin) to this position in place.
+    ///
+    /// Fast path: rotates directly via [`nalgebra::Rotation3`] instead of going through a
+    /// full homogeneous [`Transform3`] multiply.
+    pub fn apply_rotation(&mut self, rotation: Rotation3<f64>) {
+        let p: Point3<f64> = rotation * Point3::new(self.x, self.y, self.z);
+        self.x = p.x;
+        self.y = p.y;
+        self.z = p.z;
+    }
+
+    /// Applies a per-axis scale to this position in place.
+    ///
+    /// Fast path: a plain component-wise multiply. Uniform scale is just
+    /// `Scale3::new(s, s, s)` at the call site.
+    pub fn apply_scale(&mut self, scale: Scale3<f64>) {
+        self.x *= scale.vector.x;
+        self.y *= scale.vector.y;
+        self.z *= scale.vector.z;
     }
 
     /// The position with the smallest representable coordinates `(f64::MIN, f64::MIN, f64::MIN)`.
@@ -205,10 +252,10 @@ impl From<DirectPosition> for nalgebra::Point3<f32> {
     }
 }
 
-impl From<nalgebra::Point3<f64>> for DirectPosition {
-    fn from(item: nalgebra::Point3<f64>) -> Self {
-        // TODO: how to handle error?
-        Self::new(item.x, item.y, item.z).expect("Should work")
+impl TryFrom<nalgebra::Point3<f64>> for DirectPosition {
+    type Error = Error;
+    fn try_from(item: nalgebra::Point3<f64>) -> Result<Self, Self::Error> {
+        Self::new(item.x, item.y, item.z)
     }
 }
 
@@ -245,7 +292,7 @@ mod tests {
         let isometry: Isometry3<f64> =
             Isometry3::new(Vector3::new(-1.0, -2.0, 3.0), Default::default());
 
-        position.apply_transform(&isometry);
+        position.apply_transform(nalgebra::convert(isometry));
 
         assert_eq!(position, DirectPosition::new(0.0, 0.0, 6.0).unwrap());
     }
@@ -256,7 +303,7 @@ mod tests {
         let isometry: Isometry3<f64> =
             Isometry3::new(Vector3::new(1.0, 1.0, 1.0), Default::default());
 
-        position.apply_transform(&isometry);
+        position.apply_transform(nalgebra::convert(isometry));
 
         assert_eq!(position, DirectPosition::new(2.0, 3.0, 4.0).unwrap());
     }
@@ -269,7 +316,7 @@ mod tests {
             Rotation3::from_euler_angles(0.0, 0.0, FRAC_PI_2).into(),
         );
 
-        position.apply_transform(&isometry);
+        position.apply_transform(nalgebra::convert(isometry));
 
         relative_eq!(position.x(), -1.0, epsilon = f64::EPSILON);
         relative_eq!(position.y(), 1.0, epsilon = f64::EPSILON);

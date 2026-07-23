@@ -1,0 +1,91 @@
+use crate::model::base::{
+    AssociationAttributes, HasAssociationAttributes, HasAssociationAttributesMut,
+    HasOwnershipAttributes, HasOwnershipAttributesMut, OwnershipAttributes,
+};
+use crate::model::geometry::primitives::AbstractCurveKind;
+use crate::model::xlink::HRef;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AbstractCurveProperty {
+    object: Option<AbstractCurveKind>,
+    association: AssociationAttributes,
+    ownership: OwnershipAttributes,
+}
+
+impl AbstractCurveProperty {
+    pub fn new(
+        object: Option<AbstractCurveKind>,
+        association: AssociationAttributes,
+        ownership: OwnershipAttributes,
+    ) -> Self {
+        Self {
+            object,
+            association,
+            ownership,
+        }
+    }
+
+    pub fn from_object(object: AbstractCurveKind) -> Self {
+        Self {
+            object: Some(object),
+            association: AssociationAttributes::default(),
+            ownership: OwnershipAttributes::default(),
+        }
+    }
+
+    pub fn from_href(href: HRef) -> Self {
+        Self {
+            object: None,
+            association: AssociationAttributes::new_href(href),
+            ownership: OwnershipAttributes::default(),
+        }
+    }
+
+    pub fn object(&self) -> Option<&AbstractCurveKind> {
+        self.object.as_ref()
+    }
+
+    pub fn object_mut(&mut self) -> Option<&mut AbstractCurveKind> {
+        self.object.as_mut()
+    }
+
+    pub fn take_object(&mut self) -> Option<AbstractCurveKind> {
+        self.object.take()
+    }
+
+    pub fn set_object(&mut self, object: AbstractCurveKind) {
+        self.object = Some(object);
+    }
+
+    pub fn set_object_opt(&mut self, object: Option<AbstractCurveKind>) {
+        self.object = object;
+    }
+
+    pub fn clear_object(&mut self) {
+        self.object = None;
+    }
+}
+
+impl HasAssociationAttributes for AbstractCurveProperty {
+    fn association(&self) -> &AssociationAttributes {
+        &self.association
+    }
+}
+
+impl HasAssociationAttributesMut for AbstractCurveProperty {
+    fn association_mut(&mut self) -> &mut AssociationAttributes {
+        &mut self.association
+    }
+}
+
+impl HasOwnershipAttributes for AbstractCurveProperty {
+    fn ownership(&self) -> &OwnershipAttributes {
+        &self.ownership
+    }
+}
+
+impl HasOwnershipAttributesMut for AbstractCurveProperty {
+    fn ownership_mut(&mut self) -> &mut OwnershipAttributes {
+        &mut self.ownership
+    }
+}

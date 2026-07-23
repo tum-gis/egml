@@ -1,82 +1,155 @@
-use crate::model::geometry::complexes::CompositeSurface;
-use crate::model::geometry::primitives::{
-    AbstractSurface, AsAbstractSurface, AsAbstractSurfaceMut, Polygon, Surface, TriangulatedSurface,
+use crate::model::common::{
+    ApplyTransform, ComputeEnvelope, GeometryType, HasGeometryType, IterGeometries, Triangulate,
+    Triangulation,
 };
+use crate::model::geometry::primitives::{AsSurface, AsSurfaceMut, Surface, TriangulatedSurface};
+use crate::model::geometry::refs::AbstractGeometryKindRef;
 use crate::model::geometry::{DirectPosition, Envelope};
-use crate::{Error, impl_abstract_surface_traits};
-use nalgebra::Isometry3;
+use crate::{Error, impl_surface_mut_traits, impl_surface_traits};
+use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector3};
 
-/// Discriminated union of all concrete surface implementations.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SurfaceKind {
-    /// A patched [`Surface`].
-    Surface(Surface),
-    /// A planar [`Polygon`].
-    Polygon(Polygon),
-    /// A topology-aware [`CompositeSurface`].
-    CompositeSurface(CompositeSurface),
+    TriangulatedSurface(TriangulatedSurface),
 }
 
-impl AsAbstractSurface for SurfaceKind {
-    fn abstract_surface(&self) -> &AbstractSurface {
+impl AsSurface for SurfaceKind {
+    fn surface(&self) -> &Surface {
         match self {
-            Self::Surface(x) => x.abstract_surface(),
-            Self::Polygon(x) => x.abstract_surface(),
-            Self::CompositeSurface(x) => x.abstract_surface(),
+            SurfaceKind::TriangulatedSurface(x) => x.surface(),
         }
     }
 }
 
-impl AsAbstractSurfaceMut for SurfaceKind {
-    fn abstract_surface_mut(&mut self) -> &mut AbstractSurface {
+impl AsSurfaceMut for SurfaceKind {
+    fn surface_mut(&mut self) -> &mut Surface {
         match self {
-            Self::Surface(x) => x.abstract_surface_mut(),
-            Self::Polygon(x) => x.abstract_surface_mut(),
-            Self::CompositeSurface(x) => x.abstract_surface_mut(),
+            SurfaceKind::TriangulatedSurface(x) => x.surface_mut(),
         }
     }
 }
 
-impl_abstract_surface_traits!(SurfaceKind);
+impl_surface_traits!(SurfaceKind);
+impl_surface_mut_traits!(SurfaceKind);
+
+impl HasGeometryType for SurfaceKind {
+    fn geometry_type(&self) -> GeometryType {
+        match self {
+            SurfaceKind::TriangulatedSurface(x) => x.geometry_type(),
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! impl_from_for_surface_kind {
+    ($variant:ident, $type:ty) => {
+        impl From<$type> for $crate::model::geometry::primitives::surface_kind::SurfaceKind {
+            #[allow(unreachable_code)]
+            fn from(x: $type) -> Self {
+                $crate::model::geometry::primitives::surface_kind::SurfaceKind::$variant(x.into())
+            }
+        }
+        $crate::impl_from_for_abstract_surface_kind!(SurfaceKind, $type);
+    };
+    ($variant:ident) => {
+        $crate::impl_from_for_surface_kind!($variant, $variant);
+    };
+}
+
+#[macro_export]
+macro_rules! impl_try_from_for_surface_kind {
+    ($variant:ident, $type:ty) => {
+        impl TryFrom<$crate::model::geometry::primitives::surface_kind::SurfaceKind> for $type {
+            type Error = ();
+            #[allow(unreachable_code)]
+            fn try_from(
+                x: $crate::model::geometry::primitives::surface_kind::SurfaceKind,
+            ) -> Result<Self, ()> {
+                match x {
+                    $crate::model::geometry::primitives::surface_kind::SurfaceKind::$variant(k) => {
+                        k.try_into().map_err(|_| ())
+                    }
+                    #[allow(unreachable_patterns)]
+                    _ => Err(()),
+                }
+            }
+        }
+        $crate::impl_try_from_for_abstract_surface_kind!(SurfaceKind, $type);
+    };
+    ($variant:ident) => {
+        $crate::impl_try_from_for_surface_kind!($variant, $variant);
+    };
+}
+
+impl_from_for_surface_kind!(TriangulatedSurface);
+impl_try_from_for_surface_kind!(TriangulatedSurface);
 
 impl SurfaceKind {
     pub fn area_3d(&self) -> Result<f64, Error> {
         match self {
-            Self::Surface(x) => x.area_3d(),
-            Self::Polygon(x) => x.area_3d(),
-            Self::CompositeSurface(x) => x.area_3d(),
-        }
-    }
-
-    pub fn triangulate(&self) -> Result<TriangulatedSurface, Error> {
-        match self {
-            Self::Surface(x) => x.triangulate(),
-            Self::Polygon(x) => x.triangulate(),
-            Self::CompositeSurface(x) => x.triangulate(),
-        }
-    }
-
-    pub fn compute_envelope(&self) -> Option<Envelope> {
-        match self {
-            Self::Surface(x) => x.compute_envelope(),
-            Self::Polygon(x) => x.compute_envelope(),
-            Self::CompositeSurface(x) => x.compute_envelope(),
-        }
-    }
-
-    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
-        match self {
-            Self::Surface(x) => x.apply_transform(m),
-            Self::Polygon(x) => x.apply_transform(m),
-            Self::CompositeSurface(x) => x.apply_transform(m),
+            SurfaceKind::TriangulatedSurface(x) => x.area_3d(),
         }
     }
 
     pub fn points(&self) -> Vec<&DirectPosition> {
         match self {
-            Self::Surface(x) => x.points(),
-            Self::Polygon(x) => x.points(),
-            Self::CompositeSurface(x) => x.points(),
+            SurfaceKind::TriangulatedSurface(x) => x.points(),
+        }
+    }
+}
+
+impl IterGeometries for SurfaceKind {
+    fn iter_geometries(&self) -> Box<dyn Iterator<Item = AbstractGeometryKindRef<'_>> + '_> {
+        match self {
+            SurfaceKind::TriangulatedSurface(x) => x.iter_geometries(),
+        }
+    }
+}
+
+impl ApplyTransform for SurfaceKind {
+    fn apply_transform(&mut self, transform: Transform3<f64>) {
+        match self {
+            SurfaceKind::TriangulatedSurface(x) => x.apply_transform(transform),
+        }
+    }
+
+    fn apply_isometry(&mut self, isometry: Isometry3<f64>) {
+        match self {
+            SurfaceKind::TriangulatedSurface(x) => x.apply_isometry(isometry),
+        }
+    }
+
+    fn apply_translation(&mut self, vector: Vector3<f64>) {
+        match self {
+            SurfaceKind::TriangulatedSurface(x) => x.apply_translation(vector),
+        }
+    }
+
+    fn apply_rotation(&mut self, rotation: Rotation3<f64>) {
+        match self {
+            SurfaceKind::TriangulatedSurface(x) => x.apply_rotation(rotation),
+        }
+    }
+
+    fn apply_scale(&mut self, scale: Scale3<f64>) {
+        match self {
+            SurfaceKind::TriangulatedSurface(x) => x.apply_scale(scale),
+        }
+    }
+}
+
+impl ComputeEnvelope for SurfaceKind {
+    fn compute_envelope(&self) -> Option<Envelope> {
+        match self {
+            SurfaceKind::TriangulatedSurface(x) => x.compute_envelope(),
+        }
+    }
+}
+
+impl Triangulate for SurfaceKind {
+    fn triangulate(&self) -> Result<Triangulation, Error> {
+        match self {
+            SurfaceKind::TriangulatedSurface(x) => Ok(Triangulation::new(x.clone(), Vec::new())),
         }
     }
 }

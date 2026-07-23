@@ -1,9 +1,11 @@
 use crate::error::Error;
-use crate::impl_abstract_ring_traits;
 use crate::model::base::{AsAbstractGml, Id};
+use crate::model::common::{ApplyTransform, ComputeEnvelope, IterGeometries};
 use crate::model::geometry::primitives::{AbstractRing, AsAbstractRing, AsAbstractRingMut};
+use crate::model::geometry::refs::AbstractGeometryKindRef;
 use crate::model::geometry::{DirectPosition, Envelope};
-use nalgebra::{Isometry3, Vector3};
+use crate::{impl_abstract_ring_mut_traits, impl_abstract_ring_traits, impl_has_geometry_type};
+use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector3};
 
 const MINIMUM_NUMBER_OF_POINTS: usize = 3;
 
@@ -19,7 +21,7 @@ const MINIMUM_NUMBER_OF_POINTS: usize = 3;
 /// - First and last positions are not equal.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LinearRing {
-    pub(crate) abstract_ring: AbstractRing,
+    pub abstract_ring: AbstractRing,
     points: Vec<DirectPosition>,
 }
 
@@ -34,55 +36,23 @@ impl LinearRing {
     pub fn new(points: impl IntoIterator<Item = DirectPosition>) -> Result<Self, Error> {
         let points: Vec<DirectPosition> = points.into_iter().collect();
         Self::validate_points(&points, None)?;
+
         Ok(Self {
             abstract_ring: AbstractRing::default(),
             points,
         })
     }
 
-    /// Returns the positions of this ring.
-    pub fn points(&self) -> &[DirectPosition] {
-        &self.points
-    }
-
-    /// Replaces the positions of this ring.
-    ///
-    /// # Errors
-    ///
-    /// Returns the same errors as [`new`](Self::new).
-    pub fn set_points(&mut self, val: Vec<DirectPosition>) -> Result<(), Error> {
-        Self::validate_points(&val, self.id())?;
-        self.points = val;
-        Ok(())
-    }
-}
-
-impl LinearRing {
-    /// Applies a rigid-body transform to all positions in place.
-    pub fn apply_transform(&mut self, m: &Isometry3<f64>) {
-        self.points.iter_mut().for_each(|p| {
-            p.apply_transform(m);
-        });
-    }
-
-    /// Returns the 3D area_3d of this ring using the cross-product summation formula.
-    ///
-    /// Computes `|Σ (vᵢ × vᵢ₊₁)| / 2` over all consecutive vertex pairs (with wrap-around),
-    /// which gives the correct planar area_3d regardless of orientation in 3D space.
-    pub fn area_3d(&self) -> f64 {
-        let n = self.points.len();
-        let mut cross_sum = Vector3::zeros();
-        for i in 0..n {
-            let vi: Vector3<f64> = self.points[i].into();
-            let vj: Vector3<f64> = self.points[(i + 1) % n].into();
-            cross_sum += vi.cross(&vj);
-        }
-        cross_sum.norm() * 0.5
-    }
-
-    /// Returns the axis-aligned bounding box of all positions in this ring.
-    pub fn compute_envelope(&self) -> Envelope {
-        Envelope::from_points(&self.points).expect("linear ring must have valid points")
+    pub fn from_abstract_ring(
+        abstract_ring: AbstractRing,
+        points: impl IntoIterator<Item = DirectPosition>,
+    ) -> Result<Self, Error> {
+        let points: Vec<DirectPosition> = points.into_iter().collect();
+        Self::validate_points(&points, None)?;
+        Ok(Self {
+            abstract_ring,
+            points,
+        })
     }
 
     fn validate_points(points: &[DirectPosition], id: Option<&Id>) -> Result<(), Error> {
@@ -92,6 +62,7 @@ impl LinearRing {
                 position: window[0],
             });
         }
+
         if points.len() < MINIMUM_NUMBER_OF_POINTS {
             let detail = if id.is_none() {
                 Some(format!(
@@ -114,10 +85,29 @@ impl LinearRing {
                 detail,
             });
         }
+
         let first = *points.first().expect("non-empty validated above");
         if first == *points.last().expect("non-empty validated above") {
             return Err(Error::RepeatedClosingVertex { position: first });
         }
+
+        Ok(())
+    }
+
+    /// Returns the positions of this ring.
+    pub fn points(&self) -> &[DirectPosition] {
+        &self.points
+    }
+
+    /// Replaces the positions of this ring.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`new`](Self::new).
+    pub fn set_points(&mut self, val: Vec<DirectPosition>) -> Result<(), Error> {
+        Self::validate_points(&val, self.id())?;
+
+        self.points = val;
         Ok(())
     }
 }
@@ -135,11 +125,79 @@ impl AsAbstractRingMut for LinearRing {
 }
 
 impl_abstract_ring_traits!(LinearRing);
+impl_abstract_ring_mut_traits!(LinearRing);
+impl_has_geometry_type!(LinearRing, LinearRing);
+
+impl LinearRing {
+    pub fn length_3d(&self) -> f64 {
+        todo!("needs to be implemented for LinearRing")
+    }
+
+    /// Returns the 3D area_3d of this ring using the cross-product summation formula.
+    ///
+    /// Computes `|Σ (vᵢ × vᵢ₊₁)| / 2` over all consecutive vertex pairs (with wrap-around),
+    /// which gives the correct planar area_3d regardless of orientation in 3D space.
+    pub fn area_3d(&self) -> f64 {
+        let n = self.points.len();
+        let mut cross_sum = Vector3::zeros();
+        for i in 0..n {
+            let vi: Vector3<f64> = self.points[i].into();
+            let vj: Vector3<f64> = self.points[(i + 1) % n].into();
+            cross_sum += vi.cross(&vj);
+        }
+        cross_sum.norm() * 0.5
+    }
+}
+
+impl ApplyTransform for LinearRing {
+    fn apply_transform(&mut self, transform: Transform3<f64>) {
+        self.points.iter_mut().for_each(|p| {
+            p.apply_transform(transform);
+        });
+    }
+
+    fn apply_isometry(&mut self, isometry: Isometry3<f64>) {
+        self.points.iter_mut().for_each(|p| {
+            p.apply_isometry(isometry);
+        });
+    }
+
+    fn apply_translation(&mut self, vector: Vector3<f64>) {
+        self.points.iter_mut().for_each(|p| {
+            p.apply_translation(vector);
+        });
+    }
+
+    fn apply_rotation(&mut self, rotation: Rotation3<f64>) {
+        self.points.iter_mut().for_each(|p| {
+            p.apply_rotation(rotation);
+        });
+    }
+
+    fn apply_scale(&mut self, scale: Scale3<f64>) {
+        self.points.iter_mut().for_each(|p| {
+            p.apply_scale(scale);
+        });
+    }
+}
+
+impl ComputeEnvelope for LinearRing {
+    /// Returns the axis-aligned bounding box of all positions in this ring.
+    fn compute_envelope(&self) -> Option<Envelope> {
+        Some(Envelope::from_points(&self.points).expect("linear ring must have valid points"))
+    }
+}
+
+impl IterGeometries for LinearRing {
+    fn iter_geometries(&self) -> Box<dyn Iterator<Item = AbstractGeometryKindRef<'_>> + '_> {
+        Box::new(std::iter::once(self.into()))
+    }
+}
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use nalgebra::Vector3;
+    use nalgebra::{Isometry3, Vector3};
 
     #[test]
     fn area_3d_unit_square_xy() {
@@ -215,7 +273,7 @@ mod test {
         ])
         .unwrap();
 
-        linear_ring.apply_transform(&isometry);
+        linear_ring.apply_isometry(isometry);
 
         assert_eq!(linear_ring, expected_linear_ring);
     }

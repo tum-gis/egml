@@ -4,11 +4,19 @@ use crate::model::geometry::primitives::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AbstractSolid {
-    pub(crate) abstract_geometric_primitive: AbstractGeometricPrimitive,
+    pub abstract_geometric_primitive: AbstractGeometricPrimitive,
 }
 
 impl AbstractSolid {
     pub fn new(abstract_geometric_primitive: AbstractGeometricPrimitive) -> Self {
+        Self {
+            abstract_geometric_primitive,
+        }
+    }
+
+    pub fn from_abstract_geometric_primitive(
+        abstract_geometric_primitive: AbstractGeometricPrimitive,
+    ) -> Self {
         Self {
             abstract_geometric_primitive,
         }
@@ -44,20 +52,30 @@ macro_rules! impl_abstract_solid_traits {
             fn abstract_geometric_primitive(
                 &self,
             ) -> &$crate::model::geometry::primitives::AbstractGeometricPrimitive {
-                use $crate::model::geometry::primitives::AsAbstractSolid;
-                &self.abstract_solid().abstract_geometric_primitive
+                &<$type as $crate::model::geometry::primitives::AsAbstractSolid>::abstract_solid(
+                    self,
+                )
+                .abstract_geometric_primitive
             }
         }
+    };
+}
+
+#[macro_export]
+macro_rules! impl_abstract_solid_mut_traits {
+    ($type:ty) => {
+        $crate::impl_abstract_geometric_primitive_mut_traits!($type);
 
         impl $crate::model::geometry::primitives::AsAbstractGeometricPrimitiveMut for $type {
             fn abstract_geometric_primitive_mut(
                 &mut self,
             ) -> &mut $crate::model::geometry::primitives::AbstractGeometricPrimitive {
-                use $crate::model::geometry::primitives::AsAbstractSolidMut;
-                &mut self.abstract_solid_mut().abstract_geometric_primitive
+                &mut <$type as $crate::model::geometry::primitives::AsAbstractSolidMut>::abstract_solid_mut(self)
+                    .abstract_geometric_primitive
             }
         }
     };
 }
 
 impl_abstract_solid_traits!(AbstractSolid);
+impl_abstract_solid_mut_traits!(AbstractSolid);
