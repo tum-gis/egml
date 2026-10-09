@@ -1,0 +1,77 @@
+min_version = "2026.9.0"
+
+[tasks.default]
+run = ['mise run lint', 'mise run build', 'mise run test', 'mise run doc']
+
+
+[tasks.init-build-environment]
+description = "Set up the build environment"
+run = '''
+rustup component add rustfmt clippy
+'''
+
+[tasks.lint]
+description = "Format and lint the project"
+run = '''
+cargo fix --allow-dirty
+cargo clippy --fix --allow-dirty --allow-staged
+cargo fmt --all
+'''
+
+[tasks.build]
+description = "Compile the project"
+usage = '''
+flag "-r --release" help="Build artifacts in release mode, with optimizations"
+'''
+
+run = '''
+if [ "${usage_release}" = 'true' ]; then
+    cargo build --release;
+else
+    cargo build;
+fi
+'''
+
+[tasks.test]
+description = "Execute unit and integration tests"
+run = '''
+cargo fmt --all -- --check
+cargo clippy
+cargo test --verbose --all-features
+'''
+
+[tasks.run]
+description = "Run the project"
+run = "cargo run"
+
+[tasks.clean]
+description = "Remove generated artifacts"
+run = "cargo clean"
+
+[tasks.doc]
+description = "Build the documentation"
+run = '''
+cargo doc --no-deps --all-features
+echo '<meta http-equiv="refresh" content="0; url=egml/index.html">' > target/doc/index.html
+'''
+
+[tasks.serve-doc]
+description = "Start a local webserver with the documentation"
+depends = ["doc"]
+tools = { "cargo:miniserve" = "0" }
+run = '''
+miniserve ./target/doc --index index.html
+'''
+
+[tasks.release]
+description = "Create a new software release and publish it"
+usage = '''
+arg "<level>" help="Either bump by LEVEL or set the VERSION for all selected packages" {
+  choices "major" "minor" "patch" "release" "rc" "beta" "alpha"
+}
+arg "<registry>" help="Name of the Cargo registry to publish to, e.g. crates-io"
+'''
+tools = { "cargo:cargo-release" = "1" }
+run = '''
+cargo release ${usage_level?} --registry "${usage_registry?}" --workspace --no-tag --execute
+'''
