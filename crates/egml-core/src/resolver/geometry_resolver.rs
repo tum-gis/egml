@@ -168,9 +168,7 @@ mod tests {
     use super::*;
     use crate::model::base::AsAbstractGmlMut;
     use crate::model::geometry::DirectPosition;
-    use crate::model::geometry::primitives::{
-        AbstractRingKind, AbstractRingProperty, LinearRing, Point, Polygon,
-    };
+    use crate::model::geometry::primitives::{AbstractRingKind, LinearRing, Point, Polygon};
 
     fn ring_with_id(id: &str) -> LinearRing {
         let mut ring = LinearRing::new([
@@ -186,9 +184,7 @@ mod tests {
     #[test]
     fn build_indexes_self_and_descendants() {
         let mut polygon = Polygon::new(
-            Some(AbstractRingProperty::from_object(
-                AbstractRingKind::LinearRing(ring_with_id("ring-1")),
-            )),
+            Some(AbstractRingKind::LinearRing(ring_with_id("ring-1"))),
             [],
         )
         .unwrap();
@@ -216,9 +212,7 @@ mod tests {
     #[test]
     fn resolve_as_downcasts_to_concrete_type() {
         let mut polygon = Polygon::new(
-            Some(AbstractRingProperty::from_object(
-                AbstractRingKind::LinearRing(ring_with_id("ring-1")),
-            )),
+            Some(AbstractRingKind::LinearRing(ring_with_id("ring-1"))),
             [],
         )
         .unwrap();
@@ -238,18 +232,14 @@ mod tests {
     #[test]
     fn insert_root_adds_a_second_independent_tree_to_the_same_resolver() {
         let mut first_polygon = Polygon::new(
-            Some(AbstractRingProperty::from_object(
-                AbstractRingKind::LinearRing(ring_with_id("ring-1")),
-            )),
+            Some(AbstractRingKind::LinearRing(ring_with_id("ring-1"))),
             [],
         )
         .unwrap();
         first_polygon.set_id(Id::try_from("polygon-1").expect("valid id"));
 
         let mut second_polygon = Polygon::new(
-            Some(AbstractRingProperty::from_object(
-                AbstractRingKind::LinearRing(ring_with_id("ring-2")),
-            )),
+            Some(AbstractRingKind::LinearRing(ring_with_id("ring-2"))),
             [],
         )
         .unwrap();
@@ -299,9 +289,7 @@ mod tests {
     #[test]
     fn ids_and_iter_expose_all_entries() {
         let mut polygon = Polygon::new(
-            Some(AbstractRingProperty::from_object(
-                AbstractRingKind::LinearRing(ring_with_id("ring-1")),
-            )),
+            Some(AbstractRingKind::LinearRing(ring_with_id("ring-1"))),
             [],
         )
         .unwrap();

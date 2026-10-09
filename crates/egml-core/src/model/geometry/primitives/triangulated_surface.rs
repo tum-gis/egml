@@ -1,9 +1,7 @@
 use crate::error::Error;
 use crate::model::common::{ApplyTransform, ComputeEnvelope, IterGeometries};
 use crate::model::geometry::primitives::abstract_surface_patch_kind::AbstractSurfacePatchKind;
-use crate::model::geometry::primitives::{
-    AbstractSurfacePatchArrayProperty, AsSurface, AsSurfaceMut, Surface, Triangle,
-};
+use crate::model::geometry::primitives::{AsSurface, AsSurfaceMut, Surface, Triangle};
 use crate::model::geometry::refs::AbstractGeometryKindRef;
 use crate::model::geometry::{DirectPosition, Envelope};
 use crate::{impl_has_geometry_type, impl_surface_mut_traits, impl_surface_traits};
@@ -42,10 +40,8 @@ impl TriangulatedSurface {
             .into_iter()
             .map(AbstractSurfacePatchKind::Triangle)
             .collect();
-        let surface_patch_array_property: AbstractSurfacePatchArrayProperty =
-            AbstractSurfacePatchArrayProperty::from_objects(patches);
 
-        Self::new(Surface::new(surface_patch_array_property))
+        Self::new(Surface::new(patches))
     }
 
     /// Merges multiple triangulated surfaces into one by combining all their patches.
@@ -58,16 +54,10 @@ impl TriangulatedSurface {
 
         let patches: Vec<AbstractSurfacePatchKind> = surfaces
             .into_iter()
-            .flat_map(|surface| {
-                let mut patch_array = surface.surface.into_patches();
-                std::mem::take(patch_array.objects_mut())
-            })
+            .flat_map(|surface| surface.surface.into_patches())
             .collect();
 
-        let surface_patch_array_property: AbstractSurfacePatchArrayProperty =
-            AbstractSurfacePatchArrayProperty::from_objects(patches);
-
-        let surface = Surface::new(surface_patch_array_property);
+        let surface = Surface::new(patches);
         Ok(TriangulatedSurface { surface })
     }
 
@@ -101,7 +91,6 @@ impl TriangulatedSurface {
     pub fn triangles(&self) -> Vec<&Triangle> {
         self.surface
             .patches()
-            .objects()
             .iter()
             .filter_map(|patch| match patch {
                 AbstractSurfacePatchKind::Triangle(triangle) => Some(triangle),

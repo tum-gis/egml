@@ -10,7 +10,12 @@ repository.workspace = true
 description = "Library for processing GML data."
 
 
+[features]
+default = []
+# Random and time-based ids (`Id::generate_uuid_v4`/`_v7`).
+random-id = ["egml-core/random-id"]
+
 [dependencies]
-egml-core = { version = "0.0.2-alpha.5", path = "../egml-core" }
-egml-io = { version = "0.0.2-alpha.5", path = "../egml-io" }
-egml-transform = { version = "0.0.2-alpha.5", path = "../egml-transform" }
+egml-core = { version = "0.0.2-alpha.6", path = "../egml-core" }
+egml-io = { version = "0.0.2-alpha.6", path = "../egml-io" }
+egml-transform = { version = "0.0.2-alpha.6", path = "../egml-transform" }

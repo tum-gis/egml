@@ -250,9 +250,7 @@ mod tests {
     use super::*;
     use crate::Error;
     use crate::model::geometry::DirectPosition;
-    use crate::model::geometry::primitives::{
-        AbstractRingKind, AbstractRingProperty, AbstractSurfaceKind, LinearRing,
-    };
+    use crate::model::geometry::primitives::{AbstractRingKind, AbstractSurfaceKind, LinearRing};
 
     fn unit_square_polygon(z: f64) -> AbstractSurfaceKind {
         let ring = LinearRing::new([
@@ -263,9 +261,7 @@ mod tests {
         ])
         .unwrap();
         let polygon = crate::model::geometry::primitives::Polygon::new(
-            Some(AbstractRingProperty::from_object(
-                AbstractRingKind::LinearRing(ring),
-            )),
+            Some(AbstractRingKind::LinearRing(ring)),
             vec![],
         )
         .unwrap();

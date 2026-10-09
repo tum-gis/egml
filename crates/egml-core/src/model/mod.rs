@@ -10,6 +10,7 @@
 //! | [`feature`] | Abstract feature base class |
 //! | [`geometry`] | Full geometry type hierarchy |
 //! | [`measures`] | Named measure quantities: [`Length`](measures::Length), [`Area`](measures::Area), [`Volume`](measures::Volume), ... |
+//! | [`xs`] | XML Schema built-in types: [`Date`](xs::Date), [`DateTime`](xs::DateTime) |
 
 mod abstract_object;
 pub mod abstract_object_kind;
@@ -19,7 +20,9 @@ pub mod common;
 pub mod feature;
 pub mod geometry;
 pub mod measures;
+pub mod xal;
 pub mod xlink;
+pub mod xs;
 
 pub use abstract_object::*;
 pub use abstract_object_kind::*;

@@ -110,6 +110,15 @@ impl AbstractRingKind {
             AbstractRingKind::AbstractRingKind(x) => x.area_3d(),
         }
     }
+
+    /// Consumes this ring kind and returns the underlying [`LinearRing`],
+    /// unwrapping any nested [`AbstractRingKind::AbstractRingKind`] layers.
+    pub fn into_linear_ring(self) -> LinearRing {
+        match self {
+            AbstractRingKind::LinearRing(x) => x,
+            AbstractRingKind::AbstractRingKind(x) => x.into_linear_ring(),
+        }
+    }
 }
 
 impl IterGeometries for AbstractRingKind {
@@ -164,5 +173,35 @@ impl ComputeEnvelope for AbstractRingKind {
             AbstractRingKind::LinearRing(x) => x.compute_envelope(),
             AbstractRingKind::AbstractRingKind(x) => x.compute_envelope(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unit_square_ring() -> LinearRing {
+        LinearRing::new([
+            DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 1.0, 0.0).unwrap(),
+            DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
+        ])
+        .unwrap()
+    }
+
+    #[test]
+    fn into_linear_ring_direct() {
+        let kind = AbstractRingKind::LinearRing(unit_square_ring());
+        assert_eq!(kind.into_linear_ring(), unit_square_ring());
+    }
+
+    #[test]
+    fn into_linear_ring_unwraps_nested_kinds() {
+        let kind =
+            AbstractRingKind::AbstractRingKind(Box::new(AbstractRingKind::AbstractRingKind(
+                Box::new(AbstractRingKind::LinearRing(unit_square_ring())),
+            )));
+        assert_eq!(kind.into_linear_ring(), unit_square_ring());
     }
 }

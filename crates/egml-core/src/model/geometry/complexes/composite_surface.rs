@@ -153,8 +153,15 @@ impl CompositeSurface {
             .map(|area_3ds| area_3ds.into_iter().sum())
     }
 
+    /// Returns the positions of all resolved surface members, in member order.
+    ///
+    /// Members that carry only an unresolved xlink:href are skipped.
     pub fn points(&self) -> Vec<&DirectPosition> {
-        todo!("needs to be implemented")
+        self.surface_member
+            .iter()
+            .flat_map(|s| s.object())
+            .flat_map(|kind| kind.points())
+            .collect()
     }
 }
 
@@ -249,5 +256,48 @@ impl Triangulate for CompositeSurface {
 
         let combined = TriangulatedSurface::from_triangulated_surfaces(surfaces)?;
         Ok(Triangulation::new(combined, skipped))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::geometry::primitives::{
+        AbstractRingKind, AbstractSurfaceKind, LinearRing, Polygon,
+    };
+
+    fn unit_square(z: f64) -> AbstractSurfaceProperty {
+        let ring = LinearRing::new([
+            DirectPosition::new(0.0, 0.0, z).unwrap(),
+            DirectPosition::new(1.0, 0.0, z).unwrap(),
+            DirectPosition::new(1.0, 1.0, z).unwrap(),
+            DirectPosition::new(0.0, 1.0, z).unwrap(),
+        ])
+        .unwrap();
+        let polygon = Polygon::new(Some(AbstractRingKind::LinearRing(ring)), []).unwrap();
+        AbstractSurfaceProperty::from_object(AbstractSurfaceKind::Polygon(polygon))
+    }
+
+    #[test]
+    fn points_collects_all_members() {
+        let composite =
+            CompositeSurface::new([unit_square(0.0), unit_square(1.0)], AggregationType::Set)
+                .unwrap();
+        let points = composite.points();
+        assert_eq!(points.len(), 8);
+        assert_eq!(points[4], &DirectPosition::new(0.0, 0.0, 1.0).unwrap());
+    }
+
+    #[test]
+    fn points_skips_unresolved_members() {
+        let composite = CompositeSurface::new(
+            [
+                unit_square(0.0),
+                AbstractSurfaceProperty::from_href("urn:example:surface-1".into()),
+            ],
+            AggregationType::Set,
+        )
+        .unwrap();
+        assert_eq!(composite.points().len(), 4);
     }
 }

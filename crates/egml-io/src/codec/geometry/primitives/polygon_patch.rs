@@ -1,32 +1,45 @@
 use crate::Error;
 use crate::codec::geometry::primitives::abstract_surface_patch::{
     deserialize_abstract_surface_patch, serialize_abstract_surface_patch,
+    serialize_abstract_surface_patch_attributes,
 };
 use crate::codec::geometry::primitives::{
     deserialize_abstract_ring_property, serialize_abstract_ring_property,
 };
 use crate::util::{
-    Formatting, GmlElement, XmlNode, XmlNodeContent, collect_child, collect_children,
-    extract_xml_element_spans,
+    DeserializationConfig, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter,
+    collect_child, collect_children,
 };
 use egml_core::model::geometry::primitives::{
-    AbstractRingProperty, AsAbstractSurfacePatch, PolygonPatch,
+    AbstractRingKind, AsAbstractSurfacePatch, PolygonPatch,
 };
+use std::io::Write;
 
-pub fn deserialize_polygon_patch(xml_document: &[u8]) -> Result<PolygonPatch, Error> {
-    let spans = extract_xml_element_spans(xml_document)?;
-    let abstract_surface_patch = deserialize_abstract_surface_patch(xml_document, &spans)?;
+pub fn deserialize_polygon_patch(
+    xml_document: &[u8],
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<PolygonPatch, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
+
+    let abstract_surface_patch = deserialize_abstract_surface_patch(xml_document, index, config)?;
 
     let exterior = collect_child(
         xml_document,
-        &spans,
+        index,
         GmlElement::ExteriorProperty,
+        config,
         deserialize_abstract_ring_property,
     )?;
-    let interior: Vec<AbstractRingProperty> = collect_children(
+    let interior: Vec<AbstractRingKind> = collect_children(
         xml_document,
-        &spans,
+        index,
         GmlElement::InteriorProperty,
+        config,
         deserialize_abstract_ring_property,
     )?;
 
@@ -35,46 +48,64 @@ pub fn deserialize_polygon_patch(xml_document: &[u8]) -> Result<PolygonPatch, Er
     Ok(polygon_patch)
 }
 
-pub fn serialize_polygon_patch(
+pub fn serialize_polygon_patch<W: Write>(
     polygon_patch: &PolygonPatch,
-    formatting: Formatting,
-) -> Result<XmlNode, Error> {
-    let mut xml_node_parts =
-        serialize_abstract_surface_patch(polygon_patch.abstract_surface_patch(), formatting)?;
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    let attributes = serialize_polygon_patch_attributes(polygon_patch);
+
+    xml_fragment_writer.write_start_event_with_attributes(
+        GmlNamespace::Gml,
+        GmlElement::PolygonPatch,
+        attributes,
+    )?;
+
+    serialize_abstract_surface_patch(polygon_patch.abstract_surface_patch(), xml_fragment_writer)?;
 
     if let Some(object) = &polygon_patch.exterior() {
-        xml_node_parts
-            .content
-            .push(XmlNodeContent::Child(serialize_abstract_ring_property(
-                object,
-                formatting,
-                GmlElement::ExteriorProperty.into(),
-            )?));
+        serialize_abstract_ring_property(
+            object,
+            xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::ExteriorProperty,
+        )?;
     }
     for prop in polygon_patch.interior() {
-        xml_node_parts
-            .content
-            .push(XmlNodeContent::Child(serialize_abstract_ring_property(
-                prop,
-                formatting,
-                GmlElement::InteriorProperty.into(),
-            )?));
+        serialize_abstract_ring_property(
+            prop,
+            xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::InteriorProperty,
+        )?;
     }
 
-    Ok(XmlNode::new(
-        GmlElement::PolygonPatch.into(),
-        xml_node_parts,
-    ))
+    xml_fragment_writer.write_end_event(GmlNamespace::Gml, GmlElement::PolygonPatch)?;
+
+    Ok(())
+}
+
+pub fn serialize_polygon_patch_attributes(polygon_patch: &PolygonPatch) -> Vec<(String, String)> {
+    serialize_abstract_surface_patch_attributes(polygon_patch.abstract_surface_patch())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::geometry::primitives::{deserialize_polygon_patch, serialize_polygon_patch};
-    use crate::util::Formatting;
+    // Test-only convenience: builds the index the real function now
+    // requires, so existing single-argument call sites below don't all
+    // need to construct one by hand.
+    fn deserialize(xml_document: &[u8]) -> Result<super::PolygonPatch, crate::Error> {
+        let index = crate::util::XmlDocumentIndex::from_scan(xml_document, None)?;
+        super::deserialize_polygon_patch(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+    }
+
+    use crate::codec::geometry::primitives::serialize_polygon_patch;
+    use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::geometry::DirectPosition;
-    use egml_core::model::geometry::primitives::{
-        AbstractRingKind, AbstractRingProperty, LinearRing, PolygonPatch,
-    };
+    use egml_core::model::geometry::primitives::{AbstractRingKind, LinearRing, PolygonPatch};
 
     #[test]
     fn deserialize_polygon_patch_test() {
@@ -86,10 +117,10 @@ mod tests {
                     </gml:exterior>
                 </gml:PolygonPatch>";
         let polygon_patch: PolygonPatch =
-            deserialize_polygon_patch(xml_document.as_ref()).expect("deserialize should work");
+            deserialize(xml_document.as_ref()).expect("deserialize should work");
 
-        let exterior: &AbstractRingProperty = polygon_patch.exterior().expect("should be set");
-        match exterior.object().expect("should be set") {
+        let exterior: &AbstractRingKind = polygon_patch.exterior().expect("should be set");
+        match exterior {
             AbstractRingKind::LinearRing(x) => {
                 assert_eq!(x.points().len(), 3);
             }
@@ -117,12 +148,12 @@ mod tests {
                     </gml:interior>
                 </gml:PolygonPatch>";
         let polygon_patch: PolygonPatch =
-            deserialize_polygon_patch(xml_document).expect("deserialize should work");
+            deserialize(xml_document).expect("deserialize should work");
 
         assert_eq!(polygon_patch.interior().len(), 2);
 
-        let exterior: &AbstractRingProperty = polygon_patch.exterior().expect("should be set");
-        match exterior.object().expect("should be set") {
+        let exterior: &AbstractRingKind = polygon_patch.exterior().expect("should be set");
+        match exterior {
             AbstractRingKind::LinearRing(x) => {
                 assert_eq!(x.points().len(), 3);
             }
@@ -137,17 +168,16 @@ mod tests {
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
         let ring_kind = AbstractRingKind::LinearRing(LinearRing::new(points).unwrap());
-        PolygonPatch::new(Some(AbstractRingProperty::from_object(ring_kind)), vec![])
+        PolygonPatch::new(Some(ring_kind), vec![])
     }
 
     #[test]
     fn serialize_polygon_patch_writes_gml_tags() {
         let polygon_patch = make_polygon_patch();
-        let xml_node = serialize_polygon_patch(&polygon_patch, Formatting::Compact)
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_polygon_patch(&polygon_patch, &mut xml_fragment_writer)
             .expect("serialize should work");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("valid UTF-8");
 
         assert!(xml.contains("<gml:PolygonPatch"));
         assert!(xml.contains("<gml:exterior"));
@@ -162,12 +192,12 @@ mod tests {
             </gml:PolygonPatch>";
 
         let polygon_patch: PolygonPatch =
-            deserialize_polygon_patch(input_xml.as_ref()).expect("deserialize should work");
-        let output_xml_node = serialize_polygon_patch(&polygon_patch, Formatting::Compact)
+            deserialize(input_xml.as_ref()).expect("deserialize should work");
+
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_polygon_patch(&polygon_patch, &mut xml_fragment_writer)
             .expect("serialize should work");
-        let output_xml = output_xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let output_xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("valid UTF-8");
 
         assert_eq!(input_xml, output_xml);
     }

@@ -1,109 +1,117 @@
 use crate::Error;
-use crate::codec::geometry::GmlDirectPosition;
-use crate::codec::geometry::direct_position_list::GmlDirectPositionList;
+use crate::codec::geometry::direct_position::direct_position_from_start;
+use crate::codec::geometry::direct_position_list::{
+    direct_position_list_from_start, serialize_direct_position_list,
+};
 use crate::codec::geometry::primitives::abstract_curve::{
-    deserialize_abstract_curve, serialize_abstract_curve,
+    deserialize_abstract_curve, serialize_abstract_curve, serialize_abstract_curve_attributes,
 };
 use crate::util::{
-    Formatting, GmlElement, XmlNode, XmlNodeContent, dedup_adjacent_positions,
-    extract_xml_element_spans, serialize_inner,
+    DeserializationConfig, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter,
+    dedup_adjacent_positions,
 };
 use egml_core::model::geometry::DirectPosition;
 use egml_core::model::geometry::primitives::{AsAbstractCurve, LineString};
-use quick_xml::de;
-use serde::{Deserialize, Serialize};
+use quick_xml::Reader;
+use quick_xml::events::Event;
+use std::io::Write;
 
-pub fn deserialize_line_string(xml_document: &[u8]) -> Result<LineString, Error> {
-    let spans = extract_xml_element_spans(xml_document)?;
-    let abstract_curve = deserialize_abstract_curve(xml_document, &spans)?;
+pub fn deserialize_line_string(
+    xml_document: &[u8],
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<LineString, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
 
-    let parsed: GmlLineString = de::from_reader(xml_document)?;
-    let mut points: Vec<DirectPosition> = parsed.content.unwrap().try_into()?;
+    let abstract_curve = deserialize_abstract_curve(xml_document, index, config)?;
+
+    let mut reader = Reader::from_reader(xml_document);
+    reader.config_mut().trim_text(true);
+    loop {
+        match reader.read_event()? {
+            Event::Start(start) if start.local_name().as_ref() == "LineString" => break,
+            Event::Eof => return Err(Error::ElementNotFound("gml:LineString".to_string())),
+            _ => {}
+        }
+    }
+
+    let mut points: Vec<DirectPosition> = Vec::new();
+    loop {
+        match reader.read_event()? {
+            Event::Start(start) | Event::Empty(start) => match start.local_name().as_ref() {
+                "posList" => {
+                    points = direct_position_list_from_start(&start, &mut reader)?;
+                    break;
+                }
+                "pos" => {
+                    points.push(direct_position_from_start(&start, &mut reader)?);
+                }
+                _ => {}
+            },
+            Event::End(end) if end.local_name().as_ref() == "LineString" => break,
+            Event::Eof => return Err(Error::ElementNotFound("gml:posList".to_string())),
+            _ => {}
+        }
+    }
+
     dedup_adjacent_positions(&mut points, "LineString");
 
     let line_string = LineString::from_abstract_curve(abstract_curve, points)?;
     Ok(line_string)
 }
 
-pub fn serialize_line_string(
+pub fn serialize_line_string<W: Write>(
     line_string: &LineString,
-    formatting: Formatting,
-) -> Result<XmlNode, Error> {
-    let mut xml_node_parts = serialize_abstract_curve(line_string.abstract_curve(), formatting)?;
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    let attributes = serialize_line_string_attributes(line_string);
 
-    if let Some(raw) = serialize_inner(GmlLineString::from(line_string), formatting)? {
-        xml_node_parts.content.push(XmlNodeContent::Raw(raw));
-    }
+    xml_fragment_writer.write_start_event_with_attributes(
+        GmlNamespace::Gml,
+        GmlElement::LineString,
+        attributes,
+    )?;
 
-    Ok(XmlNode::new(GmlElement::LineString.into(), xml_node_parts))
+    serialize_abstract_curve(line_string.abstract_curve(), xml_fragment_writer)?;
+
+    serialize_direct_position_list(
+        line_string.points(),
+        xml_fragment_writer,
+        GmlNamespace::Gml,
+        GmlElement::PosListProperty,
+    )?;
+
+    xml_fragment_writer.write_end_event(GmlNamespace::Gml, GmlElement::LineString)?;
+
+    Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub struct GmlLineString {
-    #[serde(rename = "$value", skip_serializing_if = "Option::is_none")]
-    pub content: Option<GmlLineStringContent>,
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub enum GmlLineStringContent {
-    #[serde(rename(serialize = "gml:posList", deserialize = "posList"))]
-    PosList(GmlDirectPositionList),
-
-    #[serde(rename(serialize = "gml:pos", deserialize = "pos"))]
-    Pos(Vec<GmlDirectPosition>),
-}
-
-impl TryFrom<GmlLineStringContent> for Vec<DirectPosition> {
-    type Error = Error;
-
-    fn try_from(value: GmlLineStringContent) -> Result<Self, Self::Error> {
-        match value {
-            GmlLineStringContent::PosList(x) => x.try_into(),
-            GmlLineStringContent::Pos(x) => {
-                let points: Vec<DirectPosition> = x
-                    .into_iter()
-                    .map(|p| p.try_into())
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                Ok(points)
-            }
-        }
-    }
-}
-
-impl TryFrom<GmlLineString> for LineString {
-    type Error = Error;
-
-    fn try_from(value: GmlLineString) -> Result<Self, Self::Error> {
-        let points: Vec<DirectPosition> = value
-            .content
-            .ok_or(Error::ElementNotFound("No element found".to_string()))?
-            .try_into()?;
-
-        let line_string = LineString::new(points)?;
-        Ok(line_string)
-    }
-}
-
-impl From<&LineString> for GmlLineString {
-    fn from(line: &LineString) -> Self {
-        Self {
-            content: Some(GmlLineStringContent::PosList(GmlDirectPositionList::from(
-                line.points(),
-            ))),
-        }
-    }
+pub fn serialize_line_string_attributes(line_string: &LineString) -> Vec<(String, String)> {
+    serialize_abstract_curve_attributes(line_string.abstract_curve())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::GmlLineString;
+    // Test-only convenience: builds the index the real function now
+    // requires, so existing single-argument call sites below don't all
+    // need to construct one by hand.
+    fn deserialize(xml_document: &[u8]) -> Result<super::LineString, crate::Error> {
+        let index = crate::util::XmlDocumentIndex::from_scan(xml_document, None)?;
+        super::deserialize_line_string(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+    }
+
     use crate::codec::geometry::primitives::line_string::serialize_line_string;
-    use crate::codec::geometry::primitives::{deserialize_linear_ring, serialize_linear_ring};
-    use crate::util::{Formatting, extract_xml_element_spans};
+    use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::LineString;
-    use quick_xml::de;
 
     fn make_line_string() -> LineString {
         let points = vec![
@@ -120,8 +128,7 @@ mod tests {
                       <gml:posList srsDimension=\"3\">0.0 0.0 0.0 1.0 1.0 1.0 2.0 2.0 2.0</gml:posList>
                     </gml:LineString>";
 
-        let parsed_geometry: GmlLineString = de::from_reader(xml_document.as_ref()).expect("");
-        let line_string: LineString = parsed_geometry.try_into().unwrap();
+        let line_string = deserialize(xml_document.as_ref()).expect("should deserialize");
         assert_eq!(line_string.points().len(), 3);
     }
 
@@ -131,18 +138,30 @@ mod tests {
                       <gml:posList srsDimension=\"3\">0 0 0 1 0 0 1 0 0 2 0 0</gml:posList>
                     </gml:LineString>";
 
-        let line_string = super::deserialize_line_string(xml_document).expect("should deserialize");
+        let line_string = deserialize(xml_document).expect("should deserialize");
 
+        assert_eq!(line_string.points().len(), 3);
+    }
+
+    #[test]
+    fn deserialize_line_string_with_repeated_pos() {
+        let xml_document = b"<gml:LineString>
+              <gml:pos>0.0 0.0 0.0</gml:pos>
+              <gml:pos>1.0 1.0 0.0</gml:pos>
+              <gml:pos>1.0 1.0 1.0</gml:pos>
+            </gml:LineString>";
+
+        let line_string = deserialize(xml_document.as_ref()).expect("should deserialize");
         assert_eq!(line_string.points().len(), 3);
     }
 
     #[test]
     fn serialize_line_string_writes_gml_tags() {
         let line_string = make_line_string();
-        let xml_node = serialize_line_string(&line_string, Formatting::Compact).unwrap();
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
+
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_line_string(&line_string, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert!(xml.contains("<gml:LineString"));
         assert!(xml.contains("<gml:posList"));
@@ -152,13 +171,12 @@ mod tests {
     #[test]
     fn round_trip_line_string_preserves_points() {
         let line_string = make_line_string();
-        let xml_node = serialize_line_string(&line_string, Formatting::Compact).unwrap();
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
 
-        let recovered_line_string =
-            deserialize_linear_ring(xml.as_ref()).expect("should deserialize");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_line_string(&line_string, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
+
+        let recovered_line_string = deserialize(xml.as_ref()).expect("should deserialize");
 
         assert_eq!(
             recovered_line_string.points().len(),
@@ -181,12 +199,12 @@ mod tests {
             <gml:posList srsDimension=\"3\">0 0 0 1 0 0 2 0 0</gml:posList>\
             </gml:LineString>";
 
-        let gml: GmlLineString = de::from_reader(input_xml.as_bytes()).unwrap();
-        let line_string: LineString = gml.try_into().unwrap();
-        let xml_node = serialize_line_string(&line_string, Formatting::Compact).unwrap();
-        let output_xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
+        let line_string = deserialize(input_xml.as_bytes()).unwrap();
+
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_line_string(&line_string, &mut xml_fragment_writer).unwrap();
+        let output_xml =
+            String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert_eq!(input_xml, output_xml);
     }
@@ -200,13 +218,11 @@ mod tests {
         ];
         let line_string = LineString::new(points.clone()).unwrap();
 
-        let xml_node = serialize_line_string(&line_string, Formatting::Compact).unwrap();
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_line_string(&line_string, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
-        let recovered_line_string =
-            deserialize_linear_ring(xml.as_ref()).expect("should deserialize");
+        let recovered_line_string = deserialize(xml.as_ref()).expect("should deserialize");
 
         for (a, b) in recovered_line_string.points().iter().zip(points.iter()) {
             assert_eq!(a.x(), b.x());

@@ -1,30 +1,78 @@
 use crate::Error;
-use crate::codec::geometry::primitives::{deserialize_surface, serialize_surface};
-use crate::util::{Formatting, GmlElement, XmlNode};
-use egml_core::model::geometry::primitives::{AsSurface, TriangulatedSurface};
+use crate::codec::geometry::primitives::abstract_surface::serialize_abstract_surface;
+use crate::codec::geometry::primitives::surface::deserialize_surface;
+use crate::codec::geometry::primitives::{
+    serialize_abstract_surface_patch_array_property, serialize_surface_attributes,
+};
+use crate::util::{
+    DeserializationConfig, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter,
+};
+use egml_core::model::geometry::primitives::{AsAbstractSurface, TriangulatedSurface};
+use std::io::Write;
 
-pub fn deserialize_triangulated_surface(xml_document: &[u8]) -> Result<TriangulatedSurface, Error> {
-    let surface = deserialize_surface(xml_document)?;
+pub fn deserialize_triangulated_surface(
+    xml_document: &[u8],
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<TriangulatedSurface, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
+
+    let surface = deserialize_surface(xml_document, index, config)?;
 
     let triangulated_surface = TriangulatedSurface::new(surface)?;
     Ok(triangulated_surface)
 }
 
-pub fn serialize_triangulated_surface(
+pub fn serialize_triangulated_surface<W: Write>(
     triangulated_surface: &TriangulatedSurface,
-    formatting: Formatting,
-) -> Result<XmlNode, Error> {
-    let mut xml_node = serialize_surface(triangulated_surface.surface(), formatting)?;
-    xml_node.name = GmlElement::TriangulatedSurface.into();
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    let attributes = serialize_surface_attributes(triangulated_surface.surface());
 
-    Ok(xml_node)
+    xml_fragment_writer.write_start_event_with_attributes(
+        GmlNamespace::Gml,
+        GmlElement::TriangulatedSurface,
+        attributes,
+    )?;
+
+    serialize_abstract_surface(
+        triangulated_surface.surface().abstract_surface(),
+        xml_fragment_writer,
+    )?;
+
+    serialize_abstract_surface_patch_array_property(
+        triangulated_surface.surface().patches(),
+        xml_fragment_writer,
+        GmlNamespace::Gml,
+        GmlElement::PatchesProperty,
+    )?;
+
+    xml_fragment_writer.write_end_event(GmlNamespace::Gml, GmlElement::TriangulatedSurface)?;
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    // Test-only convenience: builds the index the real function now
+    // requires, so existing single-argument call sites below don't all
+    // need to construct one by hand.
+    fn deserialize(xml_document: &[u8]) -> Result<super::TriangulatedSurface, crate::Error> {
+        let index = crate::util::XmlDocumentIndex::from_scan(xml_document, None)?;
+        super::deserialize_triangulated_surface(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+    }
+
     use crate::codec::geometry::primitives::serialize_triangulated_surface;
-    use crate::codec::geometry::primitives::triangulated_surface::deserialize_triangulated_surface;
-    use crate::util::Formatting;
+
+    use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::{AsSurface, Triangle, TriangulatedSurface};
 
@@ -73,8 +121,7 @@ mod tests {
           </gml:patches>
         </gml:TriangulatedSurface>";
 
-        let triangulated_surface: TriangulatedSurface =
-            deserialize_triangulated_surface(xml_document).unwrap();
+        let triangulated_surface: TriangulatedSurface = deserialize(xml_document).unwrap();
 
         assert_eq!(triangulated_surface.patches_len(), 3);
     }
@@ -94,8 +141,7 @@ mod tests {
           </gml:trianglePatches>
         </gml:TriangulatedSurface>";
 
-        let triangulated_surface: TriangulatedSurface =
-            deserialize_triangulated_surface(xml_document).unwrap();
+        let triangulated_surface: TriangulatedSurface = deserialize(xml_document).unwrap();
 
         assert_eq!(triangulated_surface.patches_len(), 1);
     }
@@ -103,8 +149,9 @@ mod tests {
     #[test]
     fn serialize_triangulated_surface_writes_gml_tags() {
         let surface = make_triangulated_surface();
-        let xml_node = serialize_triangulated_surface(&surface, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_triangulated_surface(&surface, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert!(xml.contains("<gml:TriangulatedSurface"));
         assert!(xml.contains("<gml:patches"));
@@ -116,10 +163,11 @@ mod tests {
     #[test]
     fn round_trip_triangulated_surface_preserves_patch_count() {
         let surface = make_triangulated_surface();
-        let xml_node = serialize_triangulated_surface(&surface, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_triangulated_surface(&surface, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
-        let recovered = deserialize_triangulated_surface(xml.as_bytes()).unwrap();
+        let recovered = deserialize(xml.as_bytes()).unwrap();
 
         assert_eq!(recovered.patches_len(), surface.patches_len());
     }
@@ -133,11 +181,11 @@ mod tests {
             </gml:patches>\
             </gml:TriangulatedSurface>";
 
-        let triangulated_surface: TriangulatedSurface =
-            deserialize_triangulated_surface(input_xml.as_ref()).unwrap();
-        let output_xml_node =
-            serialize_triangulated_surface(&triangulated_surface, Formatting::Compact).unwrap();
-        let output_xml = output_xml_node.to_string(Formatting::Compact).unwrap();
+        let triangulated_surface: TriangulatedSurface = deserialize(input_xml.as_ref()).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_triangulated_surface(&triangulated_surface, &mut xml_fragment_writer).unwrap();
+        let output_xml =
+            String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert_eq!(input_xml, output_xml);
     }
@@ -153,9 +201,10 @@ mod tests {
         .unwrap();
         let surface = TriangulatedSurface::from_triangles(vec![t1]).unwrap();
 
-        let xml_node = serialize_triangulated_surface(&surface, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
-        let recovered = deserialize_triangulated_surface(xml.as_bytes()).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_triangulated_surface(&surface, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
+        let recovered = deserialize(xml.as_bytes()).unwrap();
 
         let orig_triangles = surface.triangles();
         let rec_triangles = recovered.triangles();

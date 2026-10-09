@@ -1,33 +1,46 @@
 use crate::Error;
 use crate::codec::geometry::aggregates::{
     deserialize_abstract_geometric_aggregate, serialize_abstract_geometric_aggregate,
+    serialize_abstract_geometric_aggregate_attributes,
 };
 use crate::codec::geometry::primitives::{
     deserialize_point_array_property, deserialize_point_property, serialize_point_array_property,
     serialize_point_property,
 };
 use crate::util::{
-    Formatting, GmlElement, XmlNode, XmlNodeContent, collect_child, collect_children,
-    extract_xml_element_spans,
+    DeserializationConfig, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter,
+    collect_child, collect_children,
 };
 use egml_core::model::geometry::aggregates::{AsAbstractGeometricAggregate, MultiPoint};
+use std::io::Write;
 
-pub fn deserialize_multi_point(xml_document: &[u8]) -> Result<MultiPoint, Error> {
-    let spans = extract_xml_element_spans(xml_document)?;
+pub fn deserialize_multi_point(
+    xml_document: &[u8],
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<MultiPoint, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
+
     let abstract_geometric_aggregate =
-        deserialize_abstract_geometric_aggregate(xml_document, &spans)?;
+        deserialize_abstract_geometric_aggregate(xml_document, index, config)?;
 
     let point_member = collect_children(
         xml_document,
-        &spans,
+        index,
         GmlElement::PointMemberProperty,
+        config,
         deserialize_point_property,
     )?;
 
     let point_members = collect_child(
         xml_document,
-        &spans,
+        index,
         GmlElement::PointMembersProperty,
+        config,
         deserialize_point_array_property,
     )?
     .flatten();
@@ -38,44 +51,66 @@ pub fn deserialize_multi_point(xml_document: &[u8]) -> Result<MultiPoint, Error>
     Ok(multi_point)
 }
 
-pub fn serialize_multi_point(
+pub fn serialize_multi_point<W: Write>(
     multi_point: &MultiPoint,
-    formatting: Formatting,
-) -> Result<XmlNode, Error> {
-    let mut parts = serialize_abstract_geometric_aggregate(
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    let attributes = serialize_multi_point_attributes(multi_point);
+
+    xml_fragment_writer.write_start_event_with_attributes(
+        GmlNamespace::Gml,
+        GmlElement::MultiPoint,
+        attributes,
+    )?;
+
+    serialize_abstract_geometric_aggregate(
         multi_point.abstract_geometric_aggregate(),
-        formatting,
+        xml_fragment_writer,
     )?;
 
     for member in multi_point.point_member() {
-        parts
-            .content
-            .push(XmlNodeContent::Child(serialize_point_property(
-                member,
-                formatting,
-                GmlElement::PointMemberProperty.into(),
-            )?));
+        serialize_point_property(
+            member,
+            xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::PointMemberProperty,
+        )?;
     }
 
     if let Some(members) = multi_point.point_members() {
-        parts
-            .content
-            .push(XmlNodeContent::Child(serialize_point_array_property(
-                members,
-                formatting,
-                GmlElement::PointMembersProperty.into(),
-            )?));
+        serialize_point_array_property(
+            members,
+            xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::PointMembersProperty,
+        )?;
     }
 
-    Ok(XmlNode::new(GmlElement::MultiPoint.into(), parts))
+    xml_fragment_writer.write_end_event(GmlNamespace::Gml, GmlElement::MultiPoint)?;
+
+    Ok(())
+}
+
+pub fn serialize_multi_point_attributes(multi_point: &MultiPoint) -> Vec<(String, String)> {
+    serialize_abstract_geometric_aggregate_attributes(multi_point.abstract_geometric_aggregate())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::geometry::aggregates::multi_point::{
-        deserialize_multi_point, serialize_multi_point,
-    };
-    use crate::util::Formatting;
+    // Test-only convenience: builds the index the real function now
+    // requires, so existing single-argument call sites below don't all
+    // need to construct one by hand.
+    fn deserialize(xml_document: &[u8]) -> Result<super::MultiPoint, crate::Error> {
+        let index = crate::util::XmlDocumentIndex::from_scan(xml_document, None)?;
+        super::deserialize_multi_point(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+    }
+
+    use crate::codec::geometry::aggregates::multi_point::serialize_multi_point;
+    use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::aggregates::MultiPoint;
     use egml_core::model::geometry::primitives::{Point, PointArrayProperty, PointProperty};
@@ -112,7 +147,7 @@ mod tests {
             </gml:pointMember>
         </gml:MultiPoint>";
 
-        let multi_point = deserialize_multi_point(xml).unwrap();
+        let multi_point = deserialize(xml).unwrap();
 
         assert_eq!(multi_point.point_member().len(), 2);
         assert!(multi_point.point_members().is_none());
@@ -127,7 +162,7 @@ mod tests {
             </gml:pointMembers>
         </gml:MultiPoint>";
 
-        let multi_point = deserialize_multi_point(xml).unwrap();
+        let multi_point = deserialize(xml).unwrap();
 
         assert!(multi_point.point_member().is_empty());
         assert_eq!(multi_point.point_members().unwrap().objects().len(), 2);
@@ -148,7 +183,7 @@ mod tests {
             </gml:pointMembers>
         </gml:MultiPoint>";
 
-        let multi_point = deserialize_multi_point(xml).unwrap();
+        let multi_point = deserialize(xml).unwrap();
 
         assert_eq!(multi_point.point_member().len(), 2);
         assert_eq!(multi_point.point_members().unwrap().objects().len(), 2);
@@ -158,11 +193,9 @@ mod tests {
     fn serialize_multi_point_writes_gml_tags() {
         let multi_point = make_multi_point();
 
-        let xml_node =
-            serialize_multi_point(&multi_point, Formatting::Compact).expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_multi_point(&multi_point, &mut xml_fragment_writer).expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert!(xml.contains("<gml:MultiPoint"));
         assert!(xml.contains("<gml:pointMember"));
@@ -176,10 +209,10 @@ mod tests {
     fn round_trip_preserves_member_counts() {
         let original = make_multi_point();
 
-        let xml_node =
-            serialize_multi_point(&original, Formatting::Compact).expect("should serialize");
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
-        let recovered = deserialize_multi_point(xml.as_bytes()).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_multi_point(&original, &mut xml_fragment_writer).expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
+        let recovered = deserialize(xml.as_bytes()).unwrap();
 
         assert_eq!(
             recovered.point_member().len(),
@@ -198,12 +231,12 @@ mod tests {
             <gml:pointMembers><gml:Point><gml:pos srsDimension=\"3\">4 5 6</gml:pos></gml:Point></gml:pointMembers>\
             </gml:MultiPoint>";
 
-        let multi_point = deserialize_multi_point(input_xml).unwrap();
-        let xml_node =
-            serialize_multi_point(&multi_point, Formatting::Compact).expect("should serialize");
-        let output = xml_node.to_string(Formatting::Compact).unwrap();
+        let multi_point = deserialize(input_xml).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_multi_point(&multi_point, &mut xml_fragment_writer).expect("should serialize");
+        let output = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
-        let recovered = deserialize_multi_point(output.as_bytes()).unwrap();
+        let recovered = deserialize(output.as_bytes()).unwrap();
 
         assert_eq!(
             recovered.point_member().len(),

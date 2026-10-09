@@ -1,8 +1,7 @@
-//! XML deserialization of GML (Geography Markup Language) documents.
+//! XML deserialization and serialization of GML (Geography Markup Language) documents.
 //!
 //! `egml-io` converts GML XML into the geometry types provided by [`egml-core`].
-//! It uses [`quick-xml`](https://docs.rs/quick-xml) for XML parsing and [`serde`]
-//! for deserialization.
+//! It uses [`quick-xml`](https://docs.rs/quick-xml) for XML parsing and deserialization.
 //!
 //! # Supported GML elements
 //!

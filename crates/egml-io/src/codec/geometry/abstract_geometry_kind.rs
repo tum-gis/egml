@@ -1,38 +1,75 @@
 use crate::Error;
 use crate::codec::geometry::aggregates::{
-    deserialize_abstract_geometric_aggregate_kind, serialize_abstract_geometric_aggregate_kind,
+    deserialize_abstract_geometric_aggregate_kind,
+    deserialize_abstract_geometric_aggregate_kind_for, serialize_abstract_geometric_aggregate_kind,
 };
 use crate::codec::geometry::primitives::{
-    deserialize_abstract_geometric_primitive_kind, serialize_abstract_geometric_primitive_kind,
+    deserialize_abstract_geometric_primitive_kind,
+    deserialize_abstract_geometric_primitive_kind_for, serialize_abstract_geometric_primitive_kind,
 };
-use crate::util::{Formatting, GmlElement, XmlElementSpans, XmlNode};
+use crate::util::{DeserializationConfig, GmlElement, XmlDocumentIndex, XmlFragmentWriter};
 use egml_core::model::geometry::AbstractGeometryKind;
+use std::io::Write;
 
 pub fn deserialize_abstract_geometry_kind(
     xml_document: &[u8],
-    spans: &XmlElementSpans<GmlElement>,
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
 ) -> Result<Option<AbstractGeometryKind>, Error> {
-    if let Some(x) = deserialize_abstract_geometric_aggregate_kind(xml_document, spans)? {
+    if let Some(x) = deserialize_abstract_geometric_aggregate_kind(xml_document, index, config)? {
         return Ok(Some(x.into()));
     }
 
-    if let Some(x) = deserialize_abstract_geometric_primitive_kind(xml_document, spans)? {
+    if let Some(x) = deserialize_abstract_geometric_primitive_kind(xml_document, index, config)? {
         return Ok(Some(x.into()));
     }
 
     Ok(None)
 }
 
-pub fn serialize_abstract_geometry_kind(
+/// Deserializes `node` as an [`AbstractGeometryKind`] given that `element`
+/// is already known to be `node`'s own type — the caller found it by
+/// iterating a parent's `children()`, which already tells it the type, so
+/// it doesn't need [`deserialize_abstract_geometry_kind`] to search for it
+/// again via [`XmlDocumentIndex::first`]. This is what lets heterogeneous
+/// ordered collections (`gml:geometryMembers`, `gml:patches`, ...) call
+/// straight into the matching branch instead of fabricating a synthetic
+/// single-child wrapper node just to satisfy a search-based API.
+///
+/// Returns `None` for any `element` outside the whole `AbstractGeometryKind`
+/// vocabulary, exactly like the search-based path does when nothing
+/// matches, rather than panicking on unexpected input.
+pub fn deserialize_abstract_geometry_kind_for(
+    element: GmlElement,
+    xml_document: &[u8],
+    node: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<Option<AbstractGeometryKind>, Error> {
+    if let Some(x) =
+        deserialize_abstract_geometric_aggregate_kind_for(element, xml_document, node, config)?
+    {
+        return Ok(Some(x.into()));
+    }
+
+    if let Some(x) =
+        deserialize_abstract_geometric_primitive_kind_for(element, xml_document, node, config)?
+    {
+        return Ok(Some(x.into()));
+    }
+
+    Ok(None)
+}
+
+pub fn serialize_abstract_geometry_kind<W: Write>(
     abstract_geometry_kind: &AbstractGeometryKind,
-    formatting: Formatting,
-) -> Result<XmlNode, Error> {
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
     match abstract_geometry_kind {
         AbstractGeometryKind::AbstractGeometricAggregateKind(x) => {
-            serialize_abstract_geometric_aggregate_kind(x, formatting)
+            serialize_abstract_geometric_aggregate_kind(x, xml_fragment_writer)
         }
         AbstractGeometryKind::AbstractGeometricPrimitiveKind(x) => {
-            serialize_abstract_geometric_primitive_kind(x, formatting)
+            serialize_abstract_geometric_primitive_kind(x, xml_fragment_writer)
         }
     }
 }
@@ -40,15 +77,13 @@ pub fn serialize_abstract_geometry_kind(
 #[cfg(test)]
 mod tests {
     use super::{deserialize_abstract_geometry_kind, serialize_abstract_geometry_kind};
-    use crate::util::{Formatting, extract_xml_element_spans};
+    use crate::util::{Formatting, XmlDocumentIndex, XmlFragmentWriter};
     use egml_core::model::geometry::AbstractGeometryKind;
     use egml_core::model::geometry::DirectPosition;
-    use egml_core::model::geometry::aggregates::{
-        AbstractGeometricAggregateKind, MultiGeometry, MultiPoint,
-    };
+    use egml_core::model::geometry::aggregates::{AbstractGeometricAggregateKind, MultiPoint};
     use egml_core::model::geometry::primitives::{
-        AbstractGeometricPrimitiveKind, AbstractRingKind, AbstractRingProperty,
-        AbstractSurfaceKind, LinearRing, Point, PointProperty, Polygon,
+        AbstractGeometricPrimitiveKind, AbstractRingKind, AbstractSurfaceKind, LinearRing, Point,
+        PointProperty, Polygon,
     };
 
     fn make_polygon_kind() -> AbstractGeometryKind {
@@ -59,7 +94,7 @@ mod tests {
             DirectPosition::new(0.0, 0.081, 0.4).unwrap(),
         ];
         let ring = AbstractRingKind::LinearRing(LinearRing::new(points).unwrap());
-        let polygon = Polygon::new(Some(AbstractRingProperty::from_object(ring)), []).unwrap();
+        let polygon = Polygon::new(Some(ring), []).unwrap();
         AbstractGeometryKind::AbstractGeometricPrimitiveKind(
             AbstractGeometricPrimitiveKind::AbstractSurfaceKind(AbstractSurfaceKind::Polygon(
                 polygon,
@@ -87,10 +122,14 @@ mod tests {
             </gml:Polygon>\
             </gml:someParent>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let kind = deserialize_abstract_geometry_kind(xml, &spans)
-            .unwrap()
-            .unwrap();
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let kind = deserialize_abstract_geometry_kind(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
         assert!(matches!(
             kind,
@@ -110,10 +149,14 @@ mod tests {
             </gml:MultiPoint>\
             </gml:someParent>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let kind = deserialize_abstract_geometry_kind(xml, &spans)
-            .unwrap()
-            .unwrap();
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let kind = deserialize_abstract_geometry_kind(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
         assert!(matches!(
             kind,
@@ -127,8 +170,13 @@ mod tests {
     fn deserialize_returns_none_when_no_geometry() {
         let xml = b"<gml:someParent/>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let kind = deserialize_abstract_geometry_kind(xml, &spans).unwrap();
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let kind = deserialize_abstract_geometry_kind(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap();
 
         assert!(kind.is_none());
     }
@@ -136,8 +184,9 @@ mod tests {
     #[test]
     fn serialize_polygon_geometry_kind() {
         let kind = make_polygon_kind();
-        let xml_node = serialize_abstract_geometry_kind(&kind, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometry_kind(&kind, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert!(xml.contains("<gml:Polygon"));
         assert!(xml.contains("<gml:exterior"));
@@ -147,8 +196,9 @@ mod tests {
     #[test]
     fn serialize_polygon_geometry_kind_newline_formatting() {
         let kind = make_polygon_kind();
-        let xml_node = serialize_abstract_geometry_kind(&kind, Formatting::NewLine).unwrap();
-        let xml = xml_node.to_string(Formatting::NewLine).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::NewLine);
+        serialize_abstract_geometry_kind(&kind, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert!(
             xml.contains('\n'),
@@ -160,10 +210,10 @@ mod tests {
         );
 
         // Compact mode must produce no newlines (sanity baseline)
-        let compact_xml = serialize_abstract_geometry_kind(&kind, Formatting::Compact)
-            .unwrap()
-            .to_string(Formatting::Compact)
-            .unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometry_kind(&kind, &mut xml_fragment_writer)
+            .expect("should serialize");
+        let compact_xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
         assert!(!compact_xml.contains('\n'));
 
         // In NewLine mode every GML tag must sit at column 0 — no indentation
@@ -184,12 +234,14 @@ mod tests {
 
     #[test]
     fn serialize_polygon_geometry_kind_indent_two_spaces() {
-        let formatting = Formatting::Indent { char: ' ', size: 2 };
+        let formatting = Formatting::Indent {
+            char: b' ',
+            size: 2,
+        };
         let kind = make_polygon_kind();
-        let xml = serialize_abstract_geometry_kind(&kind, formatting)
-            .unwrap()
-            .to_string(formatting)
-            .unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(formatting);
+        serialize_abstract_geometry_kind(&kind, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         // Root element at column 0 — no leading newline
         assert!(!xml.starts_with('\n'));
@@ -206,14 +258,13 @@ mod tests {
     #[test]
     fn serialize_polygon_geometry_kind_indent_tabs() {
         let formatting = Formatting::Indent {
-            char: '\t',
+            char: b'\t',
             size: 1,
         };
         let kind = make_polygon_kind();
-        let xml = serialize_abstract_geometry_kind(&kind, formatting)
-            .unwrap()
-            .to_string(formatting)
-            .unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(formatting);
+        serialize_abstract_geometry_kind(&kind, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert!(!xml.starts_with('\n'));
         assert!(xml.starts_with("<gml:Polygon"));
@@ -228,8 +279,9 @@ mod tests {
     #[test]
     fn serialize_multi_point_geometry_kind() {
         let kind = make_multi_point_kind();
-        let xml_node = serialize_abstract_geometry_kind(&kind, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometry_kind(&kind, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert!(xml.contains("<gml:MultiPoint"));
         assert!(xml.contains("<gml:pointMember"));
@@ -239,14 +291,19 @@ mod tests {
     #[test]
     fn round_trip_polygon_geometry_kind() {
         let kind = make_polygon_kind();
-        let xml_node = serialize_abstract_geometry_kind(&kind, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometry_kind(&kind, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         let wrapper = format!("<gml:parent>{xml}</gml:parent>");
-        let spans = extract_xml_element_spans(wrapper.as_bytes()).unwrap();
-        let recovered = deserialize_abstract_geometry_kind(wrapper.as_bytes(), &spans)
-            .unwrap()
-            .unwrap();
+        let index = XmlDocumentIndex::from_scan(wrapper.as_bytes(), None).unwrap();
+        let recovered = deserialize_abstract_geometry_kind(
+            wrapper.as_bytes(),
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
         assert!(matches!(
             recovered,
@@ -290,10 +347,14 @@ mod tests {
             </gml:MultiGeometry>\
             </gml:parent>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let kind = deserialize_abstract_geometry_kind(xml, &spans)
-            .unwrap()
-            .unwrap();
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let kind = deserialize_abstract_geometry_kind(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
         let AbstractGeometryKind::AbstractGeometricAggregateKind(
             AbstractGeometricAggregateKind::MultiGeometry(outer),
@@ -326,14 +387,19 @@ mod tests {
     #[test]
     fn round_trip_multi_point_geometry_kind() {
         let kind = make_multi_point_kind();
-        let xml_node = serialize_abstract_geometry_kind(&kind, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometry_kind(&kind, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         let wrapper = format!("<gml:parent>{xml}</gml:parent>");
-        let spans = extract_xml_element_spans(wrapper.as_bytes()).unwrap();
-        let recovered = deserialize_abstract_geometry_kind(wrapper.as_bytes(), &spans)
-            .unwrap()
-            .unwrap();
+        let index = XmlDocumentIndex::from_scan(wrapper.as_bytes(), None).unwrap();
+        let recovered = deserialize_abstract_geometry_kind(
+            wrapper.as_bytes(),
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
         assert!(matches!(
             recovered,

@@ -1,67 +1,96 @@
-use crate::codec::geometry::GmlDirectPosition;
 use crate::codec::geometry::primitives::abstract_geometry_primitive::{
     deserialize_abstract_geometric_primitive, serialize_abstract_geometric_primitive,
+    serialize_abstract_geometric_primitive_attributes,
 };
+use crate::codec::geometry::{deserialize_direct_position, serialize_direct_position};
 use crate::error::Error;
 use crate::util::{
-    Formatting, GmlElement, XmlNode, XmlNodeContent, extract_xml_element_spans, serialize_inner,
+    DeserializationConfig, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter,
 };
-use egml_core::model::geometry::DirectPosition;
 use egml_core::model::geometry::primitives::{AsAbstractGeometricPrimitive, Point};
-use quick_xml::de;
-use serde::{Deserialize, Serialize};
+use quick_xml::Reader;
+use quick_xml::events::Event;
+use std::io::Write;
 
-pub fn deserialize_point(xml_document: &[u8]) -> Result<Point, Error> {
-    let spans = extract_xml_element_spans(xml_document)?;
+pub fn deserialize_point(
+    xml_document: &[u8],
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<Point, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
+
     let abstract_geometric_primitive =
-        deserialize_abstract_geometric_primitive(xml_document, &spans)?;
+        deserialize_abstract_geometric_primitive(xml_document, index, config)?;
 
-    let parsed: GmlPoint = de::from_reader(xml_document)?;
-    let direct_position: DirectPosition = parsed.pos.try_into()?;
+    let mut reader = Reader::from_reader(xml_document);
+    reader.config_mut().trim_text(true);
+    loop {
+        match reader.read_event()? {
+            Event::Start(start) if start.local_name().as_ref() == "Point" => break,
+            Event::Eof => return Err(Error::ElementNotFound("gml:Point".to_string())),
+            _ => {}
+        }
+    }
+    let direct_position = deserialize_direct_position(&mut reader)?;
 
     let point =
         Point::from_abstract_geometric_primitive(abstract_geometric_primitive, direct_position);
     Ok(point)
 }
 
-pub fn serialize_point(point: &Point, formatting: Formatting) -> Result<XmlNode, Error> {
-    let mut xml_node_parts =
-        serialize_abstract_geometric_primitive(point.abstract_geometric_primitive(), formatting)?;
+pub fn serialize_point<W: Write>(
+    point: &Point,
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    let attributes = serialize_point_attributes(point);
 
-    if let Some(raw) = serialize_inner(GmlPoint::from(point), formatting)? {
-        xml_node_parts.content.push(XmlNodeContent::Raw(raw));
-    }
+    xml_fragment_writer.write_start_event_with_attributes(
+        GmlNamespace::Gml,
+        GmlElement::Point,
+        attributes,
+    )?;
 
-    Ok(XmlNode::new(GmlElement::Point.into(), xml_node_parts))
+    serialize_abstract_geometric_primitive(
+        point.abstract_geometric_primitive(),
+        xml_fragment_writer,
+    )?;
+
+    serialize_direct_position(
+        point.pos(),
+        xml_fragment_writer,
+        GmlNamespace::Gml,
+        GmlElement::Pos,
+    )?;
+
+    xml_fragment_writer.write_end_event(GmlNamespace::Gml, GmlElement::Point)?;
+
+    Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub struct GmlPoint {
-    #[serde(rename(serialize = "gml:pos", deserialize = "pos"))]
-    pos: GmlDirectPosition,
-}
-
-impl TryFrom<GmlPoint> for Point {
-    type Error = Error;
-
-    fn try_from(item: GmlPoint) -> Result<Self, Self::Error> {
-        let point = Point::new(item.pos.try_into()?);
-        Ok(point)
-    }
-}
-
-impl From<&Point> for GmlPoint {
-    fn from(point: &Point) -> Self {
-        Self {
-            pos: GmlDirectPosition::from(point.pos()),
-        }
-    }
+pub fn serialize_point_attributes(point: &Point) -> Vec<(String, String)> {
+    serialize_abstract_geometric_primitive_attributes(point.abstract_geometric_primitive())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::geometry::primitives::{deserialize_point, serialize_point};
-    use crate::util::{Formatting, extract_xml_element_spans};
+    // Test-only convenience: builds the index the real function now
+    // requires, so existing single-argument call sites below don't all
+    // need to construct one by hand.
+    fn deserialize(xml_document: &[u8]) -> Result<super::Point, crate::Error> {
+        let index = crate::util::XmlDocumentIndex::from_scan(xml_document, None)?;
+        super::deserialize_point(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+    }
+
+    use crate::codec::geometry::primitives::serialize_point;
+    use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::base::Id;
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::Point;
@@ -72,7 +101,7 @@ mod tests {
               <gml:pos srsDimension=\"3\" gml:id=\"UUID_6b33ecfa-6e08-4e8e-a4b5-e1d06540faf0\">678000.9484065345 5403659.060043676 417.3802376791456</gml:pos>
             </gml:Point>";
 
-        let result = deserialize_point(xml_document).unwrap();
+        let result = deserialize(xml_document).unwrap();
 
         assert_eq!(result.pos().x(), 678000.9484065345);
         assert_eq!(result.pos().y(), 5403659.060043676);
@@ -85,7 +114,7 @@ mod tests {
               <gml:pos srsDimension=\"3\">678000.9484065345 5403659.060043676 417.3802376791456</gml:pos>
             </gml:Point>";
 
-        let result = deserialize_point(xml_document).unwrap();
+        let result = deserialize(xml_document).unwrap();
 
         assert_eq!(result.pos().x(), 678000.9484065345);
         assert_eq!(result.pos().y(), 5403659.060043676);
@@ -98,7 +127,7 @@ mod tests {
               <gml:pos>678000.9484065345 5403659.060043676 417.3802376791456</gml:pos>
             </gml:Point>";
 
-        let result = deserialize_point(xml_document).unwrap();
+        let result = deserialize(xml_document).unwrap();
 
         assert_eq!(result.pos().x(), 678000.9484065345);
         assert_eq!(result.pos().y(), 5403659.060043676);
@@ -113,10 +142,9 @@ mod tests {
     #[test]
     fn serialize_point_writes_gml_tags() {
         let point = make_point(1.0, 2.0, 3.0);
-        let xml_node = serialize_point(&point, Formatting::Compact).unwrap();
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_point(&point, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert!(xml.contains("<gml:Point"));
         assert!(xml.contains("<gml:pos"));
@@ -126,11 +154,10 @@ mod tests {
     #[test]
     fn round_trip_point_without_id() {
         let original = make_point(678000.9484065345, 5403659.060043676, 417.3802376791456);
-        let xml_node = serialize_point(&original, Formatting::Compact).unwrap();
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
-        let parsed = deserialize_point(xml.as_ref()).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_point(&original, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
+        let parsed = deserialize(xml.as_ref()).unwrap();
 
         assert_eq!(parsed.pos().x(), original.pos().x());
         assert_eq!(parsed.pos().y(), original.pos().y());
@@ -144,13 +171,12 @@ mod tests {
         let mut original = Point::new(pos);
         original.set_id(Id::from_hashed_string("test-point"));
 
-        let xml_node = serialize_point(&original, Formatting::Compact).unwrap();
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_point(&original, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert!(xml.contains("id="));
-        let parsed = deserialize_point(xml.as_ref()).unwrap();
+        let parsed = deserialize(xml.as_ref()).unwrap();
         assert_eq!(parsed.pos().x(), 10.0);
         assert_eq!(parsed.pos().y(), 20.0);
         assert_eq!(parsed.pos().z(), 30.0);
@@ -162,11 +188,11 @@ mod tests {
               <gml:pos srsDimension=\"3\">1 2 3</gml:pos>\
             </gml:Point>";
 
-        let point = deserialize_point(input_xml).unwrap();
-        let xml_node = serialize_point(&point, Formatting::Compact).unwrap();
-        let output_xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
+        let point = deserialize(input_xml).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_point(&point, &mut xml_fragment_writer).unwrap();
+        let output_xml =
+            String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert_eq!(std::str::from_utf8(input_xml).unwrap(), output_xml);
     }
@@ -177,11 +203,11 @@ mod tests {
               <gml:pos srsDimension=\"3\">678000.9484065345 5403659.060043676 417.3802376791456</gml:pos>\
             </gml:Point>";
 
-        let point = deserialize_point(input_xml).unwrap();
-        let xml_node = serialize_point(&point, Formatting::Compact).unwrap();
-        let output_xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
+        let point = deserialize(input_xml).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_point(&point, &mut xml_fragment_writer).unwrap();
+        let output_xml =
+            String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert_eq!(std::str::from_utf8(input_xml).unwrap(), output_xml);
     }
@@ -193,11 +219,11 @@ mod tests {
         let z = std::f64::consts::SQRT_2;
         let original = make_point(x, y, z);
 
-        let xml_node = serialize_point(&original, Formatting::Compact).unwrap();
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
-        let parsed = deserialize_point(xml.as_ref()).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_point(&original, &mut xml_fragment_writer).unwrap();
+        let output_xml =
+            String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
+        let parsed = deserialize(output_xml.as_ref()).unwrap();
 
         assert_eq!(parsed.pos().x(), x);
         assert_eq!(parsed.pos().y(), y);

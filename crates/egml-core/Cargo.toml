@@ -10,6 +10,12 @@ repository.workspace = true
 description = "Core primitives and operations for processing GML data."
 
 
+[features]
+default = []
+# Random and time-based ids (UUID v4/v7). Needs a source of randomness and a
+# clock, which `wasm32-unknown-unknown` lacks, so it is off by default.
+random-id = ["uuid/v4", "uuid/v7"]
+
 [dependencies]
 thiserror = { workspace = true }
 nalgebra = { workspace = true }
@@ -17,9 +23,10 @@ parry3d-f64 = { workspace = true }
 itertools = { workspace = true }
 rayon = { workspace = true }
 approx = { workspace = true }
-uuid = { workspace = true, features = ["v4", "v5", "v7"] }
+uuid = { workspace = true, features = ["v5"] }
 sha2 = { workspace = true }
 earcut = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
 auto_enums = { workspace = true }
+chrono = { workspace = true, default-features = false, features = ["std"] }

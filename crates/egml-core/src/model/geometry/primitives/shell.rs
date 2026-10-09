@@ -1,3 +1,4 @@
+use crate::model::base::HasAssociationAttributes;
 use crate::model::common::{
     ApplyTransform, ComputeEnvelope, IterGeometries, Triangulate, Triangulation,
 };
@@ -123,6 +124,27 @@ impl Shell {
             })
     }
 
+    /// Returns the total 3D area of all bounding surface members.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnresolvedSurfaceReference`] if any member carries only an
+    /// xlink:href that has not been resolved into an inline object.
+    /// Propagates any error from [`AbstractSurfaceKind::area_3d`](crate::model::geometry::primitives::AbstractSurfaceKind::area_3d).
+    pub fn area_3d(&self) -> Result<f64, Error> {
+        self.members
+            .iter()
+            .map(|s| {
+                s.object()
+                    .ok_or_else(|| Error::UnresolvedSurfaceReference {
+                        href: s.href().map(|h| h.to_string()),
+                    })
+                    .and_then(|kind| kind.area_3d())
+            })
+            .collect::<Result<Vec<f64>, Error>>()
+            .map(|area_3ds| area_3ds.into_iter().sum())
+    }
+
     /// Returns the volume of the closed solid bounded by this shell.
     ///
     /// Uses the divergence theorem on the triangulated shell: `V = |Σ a·(b×c)| / 6`
@@ -237,5 +259,88 @@ impl Triangulate for Shell {
 
         let combined = TriangulatedSurface::from_triangulated_surfaces(surfaces)?;
         Ok(Triangulation::new(combined, skipped))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::geometry::primitives::{
+        AbstractRingKind, AbstractSurfaceKind, AbstractSurfacePatchKind, LinearRing, Polygon,
+        PolygonPatch, Surface,
+    };
+
+    fn square(corners: [[f64; 3]; 4]) -> AbstractSurfaceProperty {
+        let ring = LinearRing::new(corners.map(|[x, y, z]| DirectPosition::new(x, y, z).unwrap()))
+            .unwrap();
+        let polygon = Polygon::new(Some(AbstractRingKind::LinearRing(ring)), vec![]).unwrap();
+        AbstractSurfaceProperty::from_object(AbstractSurfaceKind::Polygon(polygon))
+    }
+
+    fn unit_cube_shell() -> Shell {
+        Shell::new([
+            square([[0., 0., 0.], [0., 1., 0.], [1., 1., 0.], [1., 0., 0.]]),
+            square([[0., 0., 1.], [1., 0., 1.], [1., 1., 1.], [0., 1., 1.]]),
+            square([[0., 0., 0.], [1., 0., 0.], [1., 0., 1.], [0., 0., 1.]]),
+            square([[0., 1., 0.], [0., 1., 1.], [1., 1., 1.], [1., 1., 0.]]),
+            square([[0., 0., 0.], [0., 0., 1.], [0., 1., 1.], [0., 1., 0.]]),
+            square([[1., 0., 0.], [1., 1., 0.], [1., 1., 1.], [1., 0., 1.]]),
+        ])
+        .unwrap()
+    }
+
+    #[test]
+    fn area_3d_unit_cube() {
+        assert!((unit_cube_shell().area_3d().unwrap() - 6.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn area_3d_via_abstract_surface_kind() {
+        let kind = AbstractSurfaceKind::Shell(unit_cube_shell());
+        assert!((kind.area_3d().unwrap() - 6.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn triangulate_skips_member_without_exterior_ring() {
+        let mut shell = unit_cube_shell();
+        let empty = Polygon::new(None, []).unwrap();
+        shell.push_member(AbstractSurfaceProperty::from_object(
+            AbstractSurfaceKind::Polygon(empty),
+        ));
+
+        let triangulation = shell.triangulate().unwrap();
+        assert_eq!(triangulation.skipped(), &[Error::MissingExteriorRing]);
+        assert!((shell.volume_3d().unwrap() - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn points_with_surface_member() {
+        let ring = LinearRing::new([
+            DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
+        ])
+        .unwrap();
+        let patch = PolygonPatch::new(Some(AbstractRingKind::LinearRing(ring)), []);
+        let surface = Surface::new(vec![AbstractSurfacePatchKind::PolygonPatch(patch)]);
+        let shell = Shell::new([AbstractSurfaceProperty::from_object(
+            AbstractSurfaceKind::Surface(surface),
+        )])
+        .unwrap();
+        assert_eq!(shell.points().len(), 3);
+    }
+
+    #[test]
+    fn area_3d_unresolved_surface_reference() {
+        let shell = Shell::new([AbstractSurfaceProperty::from_href(
+            "urn:example:surface-1".into(),
+        )])
+        .unwrap();
+        assert_eq!(
+            shell.area_3d(),
+            Err(Error::UnresolvedSurfaceReference {
+                href: Some("urn:example:surface-1".to_string())
+            })
+        );
     }
 }

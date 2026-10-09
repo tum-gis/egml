@@ -1,83 +1,85 @@
 use crate::Error;
-use crate::codec::abstract_object::{deserialize_abstract_object, serialize_abstract_object};
-use crate::codec::basic::GmlCode;
+use crate::codec::abstract_object::{
+    deserialize_abstract_object, serialize_abstract_object_attributes,
+};
+use crate::codec::basic::{deserialize_code, serialize_code};
 use crate::util::{
-    Formatting, GmlElement, XmlElementSpans, XmlNodeContent, XmlNodeParts, serialize_inner,
+    DeserializationConfig, GmlAttribute, GmlElement, GmlNamespace, XmlDocumentIndex, XmlElement,
+    XmlFragmentWriter, deserialize_gml_attributes,
 };
 use egml_core::model::AsAbstractObject;
 use egml_core::model::base::{AbstractGml, AsAbstractGml, AsAbstractGmlMut, Id};
-use quick_xml::de;
-use serde::{Deserialize, Serialize};
+use egml_core::model::basic_types::Code;
+use std::io::Write;
 
 pub fn deserialize_abstract_gml(
     xml_document: &[u8],
-    spans: &XmlElementSpans<GmlElement>,
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
 ) -> Result<AbstractGml, Error> {
-    let parsed: GmlAbstractGml = de::from_reader(xml_document)?;
-    let abstract_object = deserialize_abstract_object(xml_document, spans)?;
+    debug_assert!(
+        !index.is_truncated(),
+        "deserialize_abstract_gml received a truncated index — caller must scan to sufficient depth"
+    );
+
+    let abstract_object = deserialize_abstract_object(xml_document, index, config)?;
     let mut abstract_gml = AbstractGml::from_abstract_object(abstract_object);
 
-    let id = match parsed.id.as_ref() {
-        Some(s) => Some(Id::try_from(s.as_str())?),
-        None => None,
-    };
+    let attributes = deserialize_gml_attributes(xml_document)?;
+    let id = attributes
+        .get(&GmlAttribute::Id)
+        .map(|s| Id::try_from(s.as_str()))
+        .transpose()?;
     abstract_gml.set_id_opt(id);
-    abstract_gml.set_names(parsed.names.into_iter().map(Into::into).collect());
+
+    let names: Vec<Code> = index
+        .get(GmlElement::NameProperty)
+        .iter()
+        .map(|x| deserialize_code(&xml_document[x.range()]))
+        .collect::<Result<_, _>>()?;
+    abstract_gml.set_names(names);
 
     Ok(abstract_gml)
 }
 
-pub fn serialize_abstract_gml(
+pub fn serialize_abstract_gml<W: Write>(
     abstract_gml: &AbstractGml,
-    formatting: Formatting,
-) -> Result<XmlNodeParts, Error> {
-    let mut xml_node_parts = serialize_abstract_object(abstract_gml.abstract_object(), formatting)?;
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    for name in abstract_gml.names() {
+        serialize_code(
+            name,
+            xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::NameProperty,
+        )?;
+    }
+
+    Ok(())
+}
+
+pub fn serialize_abstract_gml_attributes(abstract_gml: &AbstractGml) -> Vec<(String, String)> {
+    let mut attributes = serialize_abstract_object_attributes(abstract_gml.abstract_object());
 
     if let Some(id) = abstract_gml.id() {
-        xml_node_parts
-            .attributes
-            .push(("gml:id".to_string(), id.to_string()));
+        attributes.push((GmlAttribute::Id.local_name().to_string(), id.to_string()));
     }
 
-    if let Some(raw) = serialize_inner(GmlAbstractGml::from(abstract_gml), formatting)? {
-        xml_node_parts.content.push(XmlNodeContent::Raw(raw));
-    }
-
-    Ok(xml_node_parts)
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
-pub struct GmlAbstractGml {
-    #[serde(rename(deserialize = "@id"), skip_serializing)]
-    pub id: Option<String>,
-
-    #[serde(
-        rename(serialize = "gml:name", deserialize = "name"),
-        default,
-        skip_serializing_if = "Vec::is_empty"
-    )]
-    pub names: Vec<GmlCode>,
-}
-
-impl From<&AbstractGml> for GmlAbstractGml {
-    fn from(item: &AbstractGml) -> Self {
-        Self {
-            id: item.id().as_ref().map(|x| x.to_string()),
-            names: item.names().iter().map(Into::into).collect(),
-        }
-    }
+    attributes
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::base::abstract_gml::{deserialize_abstract_gml, serialize_abstract_gml};
-    use crate::util::{Formatting, GmlElement, XmlNode, XmlNodeParts, extract_xml_element_spans};
+    use crate::codec::base::abstract_gml::{
+        deserialize_abstract_gml, serialize_abstract_gml, serialize_abstract_gml_attributes,
+    };
+    use crate::util::{Formatting, XmlDocumentIndex, XmlFragmentWriter};
     use egml_core::model::base::{AbstractGml, AsAbstractGml, AsAbstractGmlMut, Id};
 
-    fn render(parts: XmlNodeParts) -> String {
-        XmlNode::new(GmlElement::Polygon.into(), parts)
-            .to_string(Formatting::Compact)
-            .unwrap()
+    fn render_content(gml: &AbstractGml) -> String {
+        let mut writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_gml(gml, &mut writer).unwrap();
+        String::from_utf8(writer.into_bytes()).unwrap()
     }
 
     #[test]
@@ -87,8 +89,13 @@ mod tests {
             <gml:name>Name2</gml:name>
         </ExampleFeature>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("should work");
-        let parsed_gml = deserialize_abstract_gml(xml_document.as_ref(), &spans).unwrap();
+        let index = XmlDocumentIndex::from_scan(xml_document, None).expect("should work");
+        let parsed_gml = deserialize_abstract_gml(
+            xml_document.as_ref(),
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap();
 
         assert_eq!(
             parsed_gml.id().unwrap().to_string(),
@@ -106,8 +113,13 @@ mod tests {
             <gml:name>my_name_2</gml:name>
         </ExampleFeature>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("should work");
-        let abstract_gml = deserialize_abstract_gml(xml_document.as_ref(), &spans).expect("");
+        let index = XmlDocumentIndex::from_scan(xml_document, None).expect("should work");
+        let abstract_gml = deserialize_abstract_gml(
+            xml_document.as_ref(),
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .expect("");
         assert_eq!(
             abstract_gml.names(),
             vec!["my_name_1".into(), "my_name_2".into()]
@@ -126,8 +138,13 @@ mod tests {
           </gml:boundedBy>
         </ExampleFeature>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("should work");
-        let abstract_gml = deserialize_abstract_gml(xml_document.as_ref(), &spans).expect("");
+        let index = XmlDocumentIndex::from_scan(xml_document, None).expect("should work");
+        let abstract_gml = deserialize_abstract_gml(
+            xml_document.as_ref(),
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .expect("");
         assert_eq!(abstract_gml.names(), vec!["0507".into()]);
     }
 
@@ -140,8 +157,13 @@ mod tests {
           </con:Window>
         </ExampleFeature>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("should work");
-        let abstract_gml = deserialize_abstract_gml(xml_document.as_ref(), &spans).expect("");
+        let index = XmlDocumentIndex::from_scan(xml_document, None).expect("should work");
+        let abstract_gml = deserialize_abstract_gml(
+            xml_document.as_ref(),
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .expect("");
         assert_eq!(abstract_gml.names().len(), 1);
     }
 
@@ -151,46 +173,50 @@ mod tests {
             <gml:name/>
         </ExampleFeature>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("should work");
-        let abstract_gml = deserialize_abstract_gml(xml_document.as_ref(), &spans).expect("");
+        let index = XmlDocumentIndex::from_scan(xml_document, None).expect("should work");
+        let abstract_gml = deserialize_abstract_gml(
+            xml_document.as_ref(),
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .expect("");
         assert_eq!(abstract_gml.names().len(), 1);
     }
 
     #[test]
-    fn serialize_abstract_gml_empty() {
+    fn serialize_abstract_gml_attributes_empty_without_id() {
         let gml = AbstractGml::new();
-        let xml_node_parts = serialize_abstract_gml(&gml, Formatting::Compact).unwrap();
-        assert_eq!(render(xml_node_parts), "<gml:Polygon/>");
+        let attributes = serialize_abstract_gml_attributes(&gml);
+        assert!(attributes.is_empty());
     }
 
     #[test]
-    fn serialize_abstract_gml_with_id() {
+    fn serialize_abstract_gml_attributes_includes_id() {
         let id = Id::try_from("UUID_7580dd4b-0f98-3428-a3ab-dfbc85853d86").unwrap();
         let gml = AbstractGml::with_id(id);
-        let xml_node_parts = serialize_abstract_gml(&gml, Formatting::Compact).unwrap();
+        let attributes = serialize_abstract_gml_attributes(&gml);
         assert_eq!(
-            render(xml_node_parts),
-            r#"<gml:Polygon gml:id="UUID_7580dd4b-0f98-3428-a3ab-dfbc85853d86"/>"#,
+            attributes,
+            vec![(
+                "gml:id".to_string(),
+                "UUID_7580dd4b-0f98-3428-a3ab-dfbc85853d86".to_string()
+            )]
         );
     }
 
     #[test]
-    fn serialize_abstract_gml_with_name() {
-        let mut gml = AbstractGml::new();
-        gml.push_name("Name1".into());
-        let xml_node_parts = serialize_abstract_gml(&gml, Formatting::Compact).unwrap();
-        assert!(render(xml_node_parts).contains("<gml:name>Name1</gml:name>"));
+    fn serialize_abstract_gml_writes_no_content_without_names() {
+        let gml = AbstractGml::new();
+        assert_eq!(render_content(&gml), "");
     }
 
     #[test]
-    fn serialize_abstract_gml_with_id_and_names() {
-        let id = Id::try_from("UUID_7580dd4b-0f98-3428-a3ab-dfbc85853d86").unwrap();
-        let mut gml = AbstractGml::with_id(id);
+    fn serialize_abstract_gml_writes_name_elements() {
+        let mut gml = AbstractGml::new();
         gml.push_name("Name1".into());
         gml.push_name("Name2".into());
-        let xml_node_parts = serialize_abstract_gml(&gml, Formatting::Compact).unwrap();
-        let xml = render(xml_node_parts);
-        assert!(xml.contains(r#"gml:id="UUID_7580dd4b-0f98-3428-a3ab-dfbc85853d86""#));
+
+        let xml = render_content(&gml);
         assert!(xml.contains("<gml:name>Name1</gml:name>"));
         assert!(xml.contains("<gml:name>Name2</gml:name>"));
     }

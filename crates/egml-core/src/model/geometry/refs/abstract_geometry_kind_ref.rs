@@ -173,14 +173,7 @@ mod tests {
         // variant, the trickiest case in the owning conversion.
         let nested_ring =
             AbstractRingKind::AbstractRingKind(Box::new(AbstractRingKind::LinearRing(ring)));
-        let polygon: AbstractGeometryKind = Polygon::new(
-            Some(
-                crate::model::geometry::primitives::AbstractRingProperty::from_object(nested_ring),
-            ),
-            [],
-        )
-        .unwrap()
-        .into();
+        let polygon: AbstractGeometryKind = Polygon::new(Some(nested_ring), []).unwrap().into();
 
         let geometry_ref: AbstractGeometryKindRef<'_> = (&polygon).into();
         let owned: AbstractGeometryKind = geometry_ref.to_owned();

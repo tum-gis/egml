@@ -1,70 +1,109 @@
 use crate::Error;
 use crate::codec::geometry::primitives::abstract_surface::{
-    deserialize_abstract_surface, serialize_abstract_surface,
+    deserialize_abstract_surface, serialize_abstract_surface, serialize_abstract_surface_attributes,
 };
 use crate::codec::geometry::primitives::{
     deserialize_abstract_surface_patch_array_property,
     serialize_abstract_surface_patch_array_property,
 };
 use crate::util::{
-    Formatting, GmlElement, XmlElement, XmlNode, XmlNodeContent, collect_child,
-    extract_xml_element_spans,
+    DeserializationConfig, GmlElement, GmlNamespace, XmlDocumentIndex, XmlElement,
+    XmlFragmentWriter, collect_child,
 };
 use egml_core::model::geometry::primitives::{AsAbstractSurface, Surface};
+use std::io::Write;
 
-pub fn deserialize_surface(xml_document: &[u8]) -> Result<Surface, Error> {
-    let spans = extract_xml_element_spans(xml_document)?;
-    let abstract_surface = deserialize_abstract_surface(xml_document, &spans)?;
+pub fn deserialize_surface(
+    xml_document: &[u8],
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<Surface, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
+
+    let abstract_surface = deserialize_abstract_surface(xml_document, index, config)?;
 
     let patches = {
         let via_patches = collect_child(
             xml_document,
-            &spans,
+            index,
             GmlElement::PatchesProperty,
+            config,
             deserialize_abstract_surface_patch_array_property,
         )?
-        .flatten();
+        .filter(|patches| !patches.is_empty());
         if via_patches.is_some() {
             via_patches
         } else {
             collect_child(
                 xml_document,
-                &spans,
+                index,
                 GmlElement::TrianglePatchesProperty,
+                config,
                 deserialize_abstract_surface_patch_array_property,
             )?
-            .flatten()
+            .filter(|patches| !patches.is_empty())
         }
     }
-    .ok_or_else(|| Error::ElementNotFound(GmlElement::PatchesProperty.as_str().to_string()))?;
+    .ok_or_else(|| Error::ElementNotFound(GmlElement::PatchesProperty.local_name().to_string()))?;
 
     let surface = Surface::from_abstract_surface(abstract_surface, patches);
     Ok(surface)
 }
 
-pub fn serialize_surface(surface: &Surface, formatting: Formatting) -> Result<XmlNode, Error> {
-    let mut xml_node_parts = serialize_abstract_surface(surface.abstract_surface(), formatting)?;
+pub fn serialize_surface<W: Write>(
+    surface: &Surface,
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    let attributes = serialize_surface_attributes(surface);
 
-    xml_node_parts.content.push(XmlNodeContent::Child(
-        serialize_abstract_surface_patch_array_property(
-            surface.patches(),
-            formatting,
-            GmlElement::PatchesProperty.into(),
-        )?,
-    ));
+    xml_fragment_writer.write_start_event_with_attributes(
+        GmlNamespace::Gml,
+        GmlElement::Surface,
+        attributes,
+    )?;
 
-    Ok(XmlNode::new(GmlElement::Surface.into(), xml_node_parts))
+    serialize_abstract_surface(surface.abstract_surface(), xml_fragment_writer)?;
+
+    serialize_abstract_surface_patch_array_property(
+        surface.patches(),
+        xml_fragment_writer,
+        GmlNamespace::Gml,
+        GmlElement::PatchesProperty,
+    )?;
+
+    xml_fragment_writer.write_end_event(GmlNamespace::Gml, GmlElement::Surface)?;
+
+    Ok(())
+}
+
+pub fn serialize_surface_attributes(surface: &Surface) -> Vec<(String, String)> {
+    serialize_abstract_surface_attributes(surface.abstract_surface())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::geometry::primitives::{deserialize_surface, serialize_surface};
-    use crate::util::Formatting;
+    // Test-only convenience: builds the index the real function now
+    // requires, so existing single-argument call sites below don't all
+    // need to construct one by hand.
+    fn deserialize(xml_document: &[u8]) -> Result<super::Surface, crate::Error> {
+        let index = crate::util::XmlDocumentIndex::from_scan(xml_document, None)?;
+        super::deserialize_surface(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+    }
+
+    use crate::codec::geometry::primitives::serialize_surface;
+    use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::base::{AsAbstractGml, Id};
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::{
-        AbstractRingKind, AbstractRingProperty, AbstractSurfacePatchArrayProperty,
-        AbstractSurfacePatchKind, LinearRing, PolygonPatch, Surface, Triangle,
+        AbstractRingKind, AbstractSurfacePatchKind, LinearRing, PolygonPatch, Surface, Triangle,
     };
 
     fn make_surface_with_polygon_patches() -> Surface {
@@ -74,11 +113,9 @@ mod tests {
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ])
         .unwrap();
-        let exterior = AbstractRingProperty::from_object(AbstractRingKind::LinearRing(ring));
+        let exterior = AbstractRingKind::LinearRing(ring);
         let patch = PolygonPatch::new(Some(exterior), vec![]);
-        let patches = AbstractSurfacePatchArrayProperty::from_objects(vec![
-            AbstractSurfacePatchKind::PolygonPatch(patch),
-        ]);
+        let patches = vec![AbstractSurfacePatchKind::PolygonPatch(patch)];
         Surface::new(patches)
     }
 
@@ -95,10 +132,10 @@ mod tests {
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         )
         .unwrap();
-        let patches = AbstractSurfacePatchArrayProperty::from_objects(vec![
+        let patches = vec![
             AbstractSurfacePatchKind::Triangle(t1),
             AbstractSurfacePatchKind::Triangle(t2),
-        ]);
+        ];
         Surface::new(patches)
     }
 
@@ -117,15 +154,15 @@ mod tests {
             </gml:patches>
         </gml:Surface>";
 
-        let surface = deserialize_surface(xml_document).expect("should deserialize");
+        let surface = deserialize(xml_document).expect("should deserialize");
 
         assert_eq!(
             surface.id().unwrap(),
             &Id::try_from("my-surface-id").unwrap()
         );
-        assert_eq!(surface.patches().objects().len(), 1);
+        assert_eq!(surface.patches().len(), 1);
         assert!(matches!(
-            surface.patches().objects()[0],
+            surface.patches()[0],
             AbstractSurfacePatchKind::PolygonPatch(_)
         ));
     }
@@ -143,11 +180,11 @@ mod tests {
             </gml:patches>
         </gml:Surface>";
 
-        let surface = deserialize_surface(xml_document).expect("should deserialize");
+        let surface = deserialize(xml_document).expect("should deserialize");
 
-        assert_eq!(surface.patches().objects().len(), 2);
+        assert_eq!(surface.patches().len(), 2);
         assert!(matches!(
-            surface.patches().objects()[0],
+            surface.patches()[0],
             AbstractSurfacePatchKind::Triangle(_)
         ));
     }
@@ -156,10 +193,9 @@ mod tests {
     fn serialize_surface_writes_gml_tags() {
         let surface = make_surface_with_polygon_patches();
 
-        let xml_node = serialize_surface(&surface, Formatting::Compact).expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_surface(&surface, &mut xml_fragment_writer).expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert!(xml.contains("<gml:Surface"));
         assert!(xml.contains("<gml:patches"));
@@ -173,10 +209,9 @@ mod tests {
     fn serialize_surface_with_triangles_writes_gml_tags() {
         let surface = make_surface_with_triangles();
 
-        let xml_node = serialize_surface(&surface, Formatting::Compact).expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_surface(&surface, &mut xml_fragment_writer).expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert!(xml.contains("<gml:Surface"));
         assert!(xml.contains("<gml:patches"));
@@ -199,11 +234,11 @@ mod tests {
             </gml:trianglePatches>
         </gml:Surface>";
 
-        let surface = deserialize_surface(xml_document).expect("should deserialize");
+        let surface = deserialize(xml_document).expect("should deserialize");
 
-        assert_eq!(surface.patches().objects().len(), 3);
+        assert_eq!(surface.patches().len(), 3);
         assert!(matches!(
-            surface.patches().objects()[0],
+            surface.patches()[0],
             AbstractSurfacePatchKind::Triangle(_)
         ));
     }
@@ -212,33 +247,25 @@ mod tests {
     fn round_trip_surface_with_polygon_patches_preserves_patch_count() {
         let surface = make_surface_with_polygon_patches();
 
-        let xml_node = serialize_surface(&surface, Formatting::Compact).expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_surface(&surface, &mut xml_fragment_writer).expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
-        let recovered = deserialize_surface(xml.as_bytes()).expect("should deserialize");
+        let recovered = deserialize(xml.as_bytes()).expect("should deserialize");
 
-        assert_eq!(
-            recovered.patches().objects().len(),
-            surface.patches().objects().len()
-        );
+        assert_eq!(recovered.patches().len(), surface.patches().len());
     }
 
     #[test]
     fn round_trip_surface_with_triangles_preserves_patch_count() {
         let surface = make_surface_with_triangles();
 
-        let xml_node = serialize_surface(&surface, Formatting::Compact).expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_surface(&surface, &mut xml_fragment_writer).expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
-        let recovered = deserialize_surface(xml.as_bytes()).expect("should deserialize");
+        let recovered = deserialize(xml.as_bytes()).expect("should deserialize");
 
-        assert_eq!(
-            recovered.patches().objects().len(),
-            surface.patches().objects().len()
-        );
+        assert_eq!(recovered.patches().len(), surface.patches().len());
     }
 }

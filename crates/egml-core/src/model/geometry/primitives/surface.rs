@@ -4,7 +4,7 @@ use crate::model::common::{
     ApplyTransform, ComputeEnvelope, IterGeometries, Triangulate, Triangulation,
 };
 use crate::model::geometry::primitives::{
-    AbstractSurface, AbstractSurfacePatchArrayProperty, AsAbstractSurface, AsAbstractSurfaceMut,
+    AbstractSurface, AbstractSurfacePatchKind, AsAbstractSurface, AsAbstractSurfaceMut,
     TriangulatedSurface,
 };
 use crate::model::geometry::refs::AbstractGeometryKindRef;
@@ -14,16 +14,16 @@ use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector3};
 /// A 2-D geometry composed of one or more surface patches.
 ///
 /// Corresponds to `gml:Surface` in [OGC 07-036 §10.5.10](https://docs.ogc.org/is/07-036/07-036.pdf).  Patches are stored as
-/// a [`AbstractSurfacePatchArrayProperty`] and may be of mixed kinds (polygons, triangles).
+/// a list of [`AbstractSurfacePatchKind`] and may be of mixed kinds (polygons, triangles).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Surface {
     pub abstract_surface: AbstractSurface,
-    patches: AbstractSurfacePatchArrayProperty,
+    patches: Vec<AbstractSurfacePatchKind>,
 }
 
 impl Surface {
     /// Creates a new `Surface` from a patch array.
-    pub fn new(patches: AbstractSurfacePatchArrayProperty) -> Self {
+    pub fn new(patches: Vec<AbstractSurfacePatchKind>) -> Self {
         Surface {
             abstract_surface: AbstractSurface::default(),
             patches,
@@ -32,7 +32,7 @@ impl Surface {
 
     pub fn from_abstract_surface(
         abstract_surface: AbstractSurface,
-        patches: AbstractSurfacePatchArrayProperty,
+        patches: Vec<AbstractSurfacePatchKind>,
     ) -> Self {
         Self {
             abstract_surface,
@@ -40,7 +40,7 @@ impl Surface {
         }
     }
 
-    pub fn patches(&self) -> &AbstractSurfacePatchArrayProperty {
+    pub fn patches(&self) -> &[AbstractSurfacePatchKind] {
         &self.patches
     }
 }
@@ -51,12 +51,12 @@ pub trait AsSurface: AsAbstractSurface {
     fn surface(&self) -> &Surface;
 
     /// Returns the patch array of this surface.
-    fn patches(&self) -> &AbstractSurfacePatchArrayProperty {
+    fn patches(&self) -> &[AbstractSurfacePatchKind] {
         &self.surface().patches
     }
 
     fn patches_len(&self) -> usize {
-        self.patches().objects_len()
+        self.patches().len()
     }
 }
 
@@ -65,7 +65,7 @@ pub trait AsSurfaceMut: AsSurface + AsAbstractSurfaceMut {
     /// Returns a mutable reference to the underlying [`Surface`].
     fn surface_mut(&mut self) -> &mut Surface;
 
-    fn patches_mut(&mut self) -> &mut AbstractSurfacePatchArrayProperty {
+    fn patches_mut(&mut self) -> &mut Vec<AbstractSurfacePatchKind> {
         &mut self.surface_mut().patches
     }
 }
@@ -117,16 +117,21 @@ impl_surface_mut_traits!(Surface);
 impl_has_geometry_type!(Surface, Surface);
 
 impl Surface {
-    pub(crate) fn into_patches(self) -> AbstractSurfacePatchArrayProperty {
+    pub(crate) fn into_patches(self) -> Vec<AbstractSurfacePatchKind> {
         self.patches
     }
 
     pub fn area_3d(&self) -> Result<f64, Error> {
-        self.patches.area_3d()
+        self.patches
+            .iter()
+            .map(|p| p.area_3d())
+            .collect::<Result<Vec<f64>, Error>>()
+            .map(|area_3ds| area_3ds.into_iter().sum())
     }
 
+    /// Returns the positions of all patches, in patch order.
     pub fn points(&self) -> Vec<&DirectPosition> {
-        todo!("needs to be implemented")
+        self.patches.iter().flat_map(|p| p.points()).collect()
     }
 }
 
@@ -138,30 +143,44 @@ impl IterGeometries for Surface {
 
 impl ApplyTransform for Surface {
     fn apply_transform(&mut self, transform: Transform3<f64>) {
-        self.patches.apply_transform(transform)
+        self.patches
+            .iter_mut()
+            .for_each(|x| x.apply_transform(transform));
     }
 
     fn apply_isometry(&mut self, isometry: Isometry3<f64>) {
-        self.patches.apply_isometry(isometry)
+        self.patches
+            .iter_mut()
+            .for_each(|x| x.apply_isometry(isometry));
     }
 
     fn apply_translation(&mut self, vector: Vector3<f64>) {
-        self.patches.apply_translation(vector)
+        self.patches
+            .iter_mut()
+            .for_each(|x| x.apply_translation(vector));
     }
 
     fn apply_rotation(&mut self, rotation: Rotation3<f64>) {
-        self.patches.apply_rotation(rotation)
+        self.patches
+            .iter_mut()
+            .for_each(|x| x.apply_rotation(rotation));
     }
 
     fn apply_scale(&mut self, scale: Scale3<f64>) {
-        self.patches.apply_scale(scale)
+        self.patches.iter_mut().for_each(|x| x.apply_scale(scale));
     }
 }
 
 impl ComputeEnvelope for Surface {
     /// Returns the union of the bounding boxes of all patches.
     fn compute_envelope(&self) -> Option<Envelope> {
-        self.patches.compute_envelope()
+        let envelopes: Vec<Envelope> = self
+            .patches
+            .iter()
+            .flat_map(|x| x.compute_envelope())
+            .collect();
+
+        Envelope::from_envelopes(&envelopes)
     }
 }
 
@@ -177,7 +196,7 @@ impl Triangulate for Surface {
         let mut surfaces = Vec::new();
         let mut skipped = Vec::new();
 
-        for patch in self.patches.objects() {
+        for patch in &self.patches {
             match patch.triangulate() {
                 Ok(triangulation) => {
                     let (surface, nested_skipped) = triangulation.into_parts();
@@ -192,5 +211,40 @@ impl Triangulate for Surface {
 
         let combined = TriangulatedSurface::from_triangulated_surfaces(surfaces)?;
         Ok(Triangulation::new(combined, skipped))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::geometry::primitives::{
+        AbstractRingKind, AbstractSurfacePatchKind, LinearRing, PolygonPatch, Triangle,
+    };
+
+    fn pos(x: f64, y: f64, z: f64) -> DirectPosition {
+        DirectPosition::new(x, y, z).unwrap()
+    }
+
+    #[test]
+    fn points_collects_all_patches() {
+        let square = LinearRing::new([
+            pos(0., 0., 0.),
+            pos(1., 0., 0.),
+            pos(1., 1., 0.),
+            pos(0., 1., 0.),
+        ])
+        .unwrap();
+        let patch = PolygonPatch::new(Some(AbstractRingKind::LinearRing(square)), []);
+        let triangle =
+            Triangle::from_points(pos(0., 0., 1.), pos(1., 0., 1.), pos(0., 1., 1.)).unwrap();
+        let surface = Surface::new(vec![
+            AbstractSurfacePatchKind::PolygonPatch(patch),
+            AbstractSurfacePatchKind::Triangle(triangle),
+        ]);
+
+        let points = surface.points();
+        assert_eq!(points.len(), 7);
+        assert_eq!(points[0], &pos(0., 0., 0.));
+        assert_eq!(points[4], &pos(0., 0., 1.));
     }
 }

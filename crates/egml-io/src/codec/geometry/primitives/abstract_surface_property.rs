@@ -1,68 +1,67 @@
 use crate::Error;
 use crate::codec::base::{
-    GmlAssociationAttributes, GmlOwnershipAttributes, serialize_association_attributes,
-    serialize_ownership_attributes,
+    deserialize_association_and_ownership_attributes,
+    serialize_association_and_ownership_attributes,
 };
 use crate::codec::geometry::primitives::{
     deserialize_abstract_surface_kind, serialize_abstract_surface_kind,
 };
-use crate::util::{Formatting, GmlElement, XmlElementSpans, XmlNode, XmlNodeContent, XmlNodeParts};
+use crate::util::{
+    DeserializationConfig, GmlElement, XmlDocumentIndex, XmlElement, XmlFragmentWriter,
+    XmlNamespace,
+};
 use egml_core::model::base::{HasAssociationAttributes, HasOwnershipAttributes};
 use egml_core::model::geometry::primitives::AbstractSurfaceProperty;
-use quick_xml::de;
-use serde::{Deserialize, Serialize};
+use std::io::Write;
 
 pub fn deserialize_abstract_surface_property(
     xml_document: &[u8],
-    spans: &XmlElementSpans<GmlElement>,
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
 ) -> Result<AbstractSurfaceProperty, Error> {
-    let parsed: GmlAbstractSurfaceProperty = de::from_reader(xml_document)?;
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
 
-    let object = deserialize_abstract_surface_kind(xml_document, spans)?;
+    let (association, ownership) = deserialize_association_and_ownership_attributes(xml_document)?;
+    let object = deserialize_abstract_surface_kind(xml_document, index, config)?;
 
-    Ok(AbstractSurfaceProperty::new(
-        object,
-        parsed.association.try_into()?,
-        parsed.ownership.into(),
-    ))
+    Ok(AbstractSurfaceProperty::new(object, association, ownership))
 }
 
-pub fn serialize_abstract_surface_property(
+pub fn serialize_abstract_surface_property<N: XmlNamespace, E: XmlElement, W: Write>(
     abstract_surface_property: &AbstractSurfaceProperty,
-    formatting: Formatting,
-    target_xml_element: &'static str,
-) -> Result<XmlNode, Error> {
-    let mut xml_node_parts = XmlNodeParts::empty();
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+    target_xml_namespace: N,
+    target_xml_element: E,
+) -> Result<(), Error> {
+    let attributes = serialize_association_and_ownership_attributes(
+        abstract_surface_property.association(),
+        abstract_surface_property.ownership(),
+    );
 
-    xml_node_parts
-        .attributes
-        .extend(serialize_association_attributes(
-            abstract_surface_property.association(),
-        ));
-    xml_node_parts
-        .attributes
-        .extend(serialize_ownership_attributes(
-            abstract_surface_property.ownership(),
-        ));
-
-    if let Some(abstract_surface_kind) = abstract_surface_property.object() {
-        xml_node_parts
-            .content
-            .push(XmlNodeContent::Child(serialize_abstract_surface_kind(
-                abstract_surface_kind,
-                formatting,
-            )?));
+    match abstract_surface_property.object() {
+        Some(abstract_surface_kind) => {
+            xml_fragment_writer.write_start_event_with_attributes(
+                target_xml_namespace,
+                target_xml_element,
+                attributes,
+            )?;
+            serialize_abstract_surface_kind(abstract_surface_kind, xml_fragment_writer)?;
+            xml_fragment_writer.write_end_event(target_xml_namespace, target_xml_element)?;
+        }
+        None => {
+            xml_fragment_writer.write_empty_element_with_attributes(
+                target_xml_namespace,
+                target_xml_element,
+                attributes,
+            )?;
+        }
     }
 
-    Ok(XmlNode::new(target_xml_element, xml_node_parts))
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub struct GmlAbstractSurfaceProperty {
-    #[serde(flatten)]
-    pub association: GmlAssociationAttributes,
-    #[serde(flatten)]
-    pub ownership: GmlOwnershipAttributes,
+    Ok(())
 }
 
 #[cfg(test)]
@@ -70,12 +69,11 @@ mod tests {
     use crate::codec::geometry::primitives::abstract_surface_property::{
         deserialize_abstract_surface_property, serialize_abstract_surface_property,
     };
-    use crate::util::{Formatting, GmlElement, extract_xml_element_spans};
+    use crate::util::{Formatting, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter};
     use egml_core::model::base::HasAssociationAttributes;
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::{
-        AbstractRingKind, AbstractRingProperty, AbstractSurfaceKind, AbstractSurfaceProperty,
-        LinearRing, Polygon,
+        AbstractRingKind, AbstractSurfaceKind, AbstractSurfaceProperty, LinearRing, Polygon,
     };
     use egml_core::model::xlink::HRef;
 
@@ -86,13 +84,7 @@ mod tests {
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ])
         .unwrap();
-        let polygon = Polygon::new(
-            Some(AbstractRingProperty::from_object(
-                AbstractRingKind::LinearRing(ring),
-            )),
-            vec![],
-        )
-        .unwrap();
+        let polygon = Polygon::new(Some(AbstractRingKind::LinearRing(ring)), vec![]).unwrap();
         AbstractSurfaceProperty::from_object(AbstractSurfaceKind::Polygon(polygon))
     }
 
@@ -108,9 +100,14 @@ mod tests {
     </gml:Polygon>
 </gml:surfaceMember>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("extracting spans should work");
-        let property = deserialize_abstract_surface_property(xml_document, &spans)
-            .expect("should deserialize");
+        let index =
+            XmlDocumentIndex::from_scan(xml_document, None).expect("extracting spans should work");
+        let property = deserialize_abstract_surface_property(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .expect("should deserialize");
 
         assert!(matches!(
             property.object(),
@@ -122,9 +119,14 @@ mod tests {
     fn deserialize_abstract_surface_property_with_xlink() {
         let xml_document = b"<gml:surfaceMember xlink:href=\"#some-surface-id\"/>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("extracting spans should work");
-        let property = deserialize_abstract_surface_property(xml_document, &spans)
-            .expect("should deserialize");
+        let index =
+            XmlDocumentIndex::from_scan(xml_document, None).expect("extracting spans should work");
+        let property = deserialize_abstract_surface_property(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .expect("should deserialize");
 
         assert_eq!(property.href(), Some(&HRef::from_local("some-surface-id")));
         assert!(property.object().is_none());
@@ -134,15 +136,15 @@ mod tests {
     fn serialize_abstract_surface_property_writes_gml_tags() {
         let property = make_surface_property();
 
-        let xml_node = serialize_abstract_surface_property(
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_surface_property(
             &property,
-            Formatting::Compact,
-            GmlElement::SurfaceMemberProperty.into(),
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::SurfaceMemberProperty,
         )
         .expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("valid UTF-8");
 
         assert!(xml.contains("<gml:surfaceMember"));
         assert!(xml.contains("<gml:Polygon"));
@@ -159,23 +161,53 @@ mod tests {
             </gml:LinearRing></gml:exterior></gml:Polygon>\
             </gml:surfaceMember>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("extracting spans should work");
-        let property = deserialize_abstract_surface_property(xml_document, &spans).unwrap();
-
-        let xml_node = serialize_abstract_surface_property(
-            &property,
-            Formatting::Compact,
-            GmlElement::SurfaceMemberProperty.into(),
+        let index =
+            XmlDocumentIndex::from_scan(xml_document, None).expect("extracting spans should work");
+        let property = deserialize_abstract_surface_property(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
         )
         .unwrap();
-        let output = xml_node.to_string(Formatting::Compact).unwrap();
 
-        let spans2 = extract_xml_element_spans(output.as_bytes()).unwrap();
-        let recovered = deserialize_abstract_surface_property(output.as_bytes(), &spans2).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_surface_property(
+            &property,
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::SurfaceMemberProperty,
+        )
+        .unwrap();
+        let output = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
+
+        let spans2 = XmlDocumentIndex::from_scan(output.as_bytes(), None).unwrap();
+        let recovered = deserialize_abstract_surface_property(
+            output.as_bytes(),
+            &spans2,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap();
 
         assert!(matches!(
             recovered.object(),
             Some(AbstractSurfaceKind::Polygon(_))
         ));
+    }
+
+    #[test]
+    fn serialize_href_only_property_writes_self_closed_tag() {
+        let property = AbstractSurfaceProperty::from_href(HRef::from_local("some-id"));
+
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_surface_property(
+            &property,
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::SurfaceMemberProperty,
+        )
+        .unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
+
+        assert_eq!(xml, r##"<gml:surfaceMember xlink:href="#some-id"/>"##);
     }
 }

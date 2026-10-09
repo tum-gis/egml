@@ -1,23 +1,35 @@
 use crate::Error;
 use crate::codec::geometry::primitives::{
     deserialize_abstract_surface, deserialize_abstract_surface_property,
-    serialize_abstract_surface, serialize_abstract_surface_property,
+    serialize_abstract_surface, serialize_abstract_surface_attributes,
+    serialize_abstract_surface_property,
 };
 use crate::util::{
-    Formatting, GmlElement, XmlNode, XmlNodeContent, collect_children_lenient,
-    extract_xml_element_spans,
+    DeserializationConfig, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter,
+    collect_children_lenient,
 };
 use egml_core::model::geometry::primitives::{AsAbstractSurface, Shell};
+use std::io::Write;
 use tracing::debug;
 
-pub fn deserialize_shell(xml_document: &[u8]) -> Result<Shell, Error> {
-    let spans = extract_xml_element_spans(xml_document)?;
-    let abstract_surface = deserialize_abstract_surface(xml_document, &spans)?;
+pub fn deserialize_shell(
+    xml_document: &[u8],
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<Shell, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
+
+    let abstract_surface = deserialize_abstract_surface(xml_document, index, config)?;
 
     let (members, skipped) = collect_children_lenient(
         xml_document,
-        &spans,
+        index,
         GmlElement::SurfaceMemberProperty,
+        config,
         deserialize_abstract_surface_property,
     );
     if !skipped.is_empty() {
@@ -30,30 +42,57 @@ pub fn deserialize_shell(xml_document: &[u8]) -> Result<Shell, Error> {
     Ok(Shell::from_abstract_surface(abstract_surface, members)?)
 }
 
-pub fn serialize_shell(shell: &Shell, formatting: Formatting) -> Result<XmlNode, Error> {
-    let mut parts = serialize_abstract_surface(shell.abstract_surface(), formatting)?;
+pub fn serialize_shell<W: Write>(
+    shell: &Shell,
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    let attributes = serialize_shell_attributes(shell);
+
+    xml_fragment_writer.write_start_event_with_attributes(
+        GmlNamespace::Gml,
+        GmlElement::Shell,
+        attributes,
+    )?;
+
+    serialize_abstract_surface(shell.abstract_surface(), xml_fragment_writer)?;
 
     for member in shell.members() {
-        parts
-            .content
-            .push(XmlNodeContent::Child(serialize_abstract_surface_property(
-                member,
-                formatting,
-                GmlElement::SurfaceMemberProperty.into(),
-            )?));
+        serialize_abstract_surface_property(
+            member,
+            xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::SurfaceMemberProperty,
+        )?;
     }
 
-    Ok(XmlNode::new(GmlElement::Shell.into(), parts))
+    xml_fragment_writer.write_end_event(GmlNamespace::Gml, GmlElement::Shell)?;
+
+    Ok(())
+}
+
+pub fn serialize_shell_attributes(shell: &Shell) -> Vec<(String, String)> {
+    serialize_abstract_surface_attributes(shell.abstract_surface())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::geometry::primitives::shell::{deserialize_shell, serialize_shell};
-    use crate::util::Formatting;
+    // Test-only convenience: builds the index the real function now
+    // requires, so existing single-argument call sites below don't all
+    // need to construct one by hand.
+    fn deserialize(xml_document: &[u8]) -> Result<super::Shell, crate::Error> {
+        let index = crate::util::XmlDocumentIndex::from_scan(xml_document, None)?;
+        super::deserialize_shell(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+    }
+
+    use crate::codec::geometry::primitives::shell::serialize_shell;
+    use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::{
-        AbstractRingKind, AbstractRingProperty, AbstractSurfaceKind, AbstractSurfaceProperty,
-        LinearRing, Polygon, Shell,
+        AbstractRingKind, AbstractSurfaceKind, AbstractSurfaceProperty, LinearRing, Polygon, Shell,
     };
 
     fn make_shell() -> Shell {
@@ -63,13 +102,7 @@ mod tests {
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ])
         .unwrap();
-        let polygon = Polygon::new(
-            Some(AbstractRingProperty::from_object(
-                AbstractRingKind::LinearRing(ring),
-            )),
-            [],
-        )
-        .unwrap();
+        let polygon = Polygon::new(Some(AbstractRingKind::LinearRing(ring)), []).unwrap();
         let member = AbstractSurfaceProperty::from_object(AbstractSurfaceKind::Polygon(polygon));
         Shell::new([member]).unwrap()
     }
@@ -97,7 +130,7 @@ mod tests {
             </gml:surfaceMember>
         </gml:Shell>";
 
-        let shell = deserialize_shell(xml_document).expect("should deserialize");
+        let shell = deserialize(xml_document).expect("should deserialize");
 
         assert_eq!(shell.members().len(), 2);
     }
@@ -125,7 +158,7 @@ mod tests {
             </gml:surfaceMember>
         </gml:Shell>";
 
-        let shell = deserialize_shell(xml_document).expect("should deserialize");
+        let shell = deserialize(xml_document).expect("should deserialize");
 
         assert_eq!(shell.members().len(), 1);
     }
@@ -134,10 +167,9 @@ mod tests {
     fn serialize_shell_writes_gml_tags() {
         let shell = make_shell();
 
-        let xml_node = serialize_shell(&shell, Formatting::Compact).expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_shell(&shell, &mut xml_fragment_writer).expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert!(xml.contains("<gml:Shell"));
         assert!(xml.contains("<gml:surfaceMember"));
@@ -150,10 +182,11 @@ mod tests {
     fn round_trip_shell_preserves_member_count() {
         let shell = make_shell();
 
-        let xml_node = serialize_shell(&shell, Formatting::Compact).expect("should serialize");
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_shell(&shell, &mut xml_fragment_writer).expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
-        let recovered = deserialize_shell(xml.as_bytes()).expect("should deserialize");
+        let recovered = deserialize(xml.as_bytes()).expect("should deserialize");
 
         assert_eq!(recovered.members().len(), shell.members().len());
     }

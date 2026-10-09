@@ -1,24 +1,37 @@
 use crate::Error;
 use crate::codec::geometry::primitives::abstract_surface_patch::{
     deserialize_abstract_surface_patch, serialize_abstract_surface_patch,
+    serialize_abstract_surface_patch_attributes,
 };
 use crate::codec::geometry::primitives::{
     deserialize_abstract_ring_property, serialize_abstract_ring_property,
 };
 use crate::util::{
-    Formatting, GmlElement, XmlNode, XmlNodeContent, collect_child, extract_xml_element_spans,
+    DeserializationConfig, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter,
+    collect_child,
 };
 use egml_core::model::geometry::primitives::AsAbstractSurfacePatch;
 use egml_core::model::geometry::primitives::Triangle;
+use std::io::Write;
 
-pub fn deserialize_triangle(xml_document: &[u8]) -> Result<Triangle, Error> {
-    let spans = extract_xml_element_spans(xml_document)?;
-    let abstract_surface_patch = deserialize_abstract_surface_patch(xml_document, &spans)?;
+pub fn deserialize_triangle(
+    xml_document: &[u8],
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<Triangle, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
+
+    let abstract_surface_patch = deserialize_abstract_surface_patch(xml_document, index, config)?;
 
     let exterior = collect_child(
         xml_document,
-        &spans,
+        index,
         GmlElement::ExteriorProperty,
+        config,
         deserialize_abstract_ring_property,
     )?
     .unwrap();
@@ -27,26 +40,52 @@ pub fn deserialize_triangle(xml_document: &[u8]) -> Result<Triangle, Error> {
     Ok(triangle)
 }
 
-pub fn serialize_triangle(triangle: &Triangle, formatting: Formatting) -> Result<XmlNode, Error> {
-    let mut xml_node_parts =
-        serialize_abstract_surface_patch(triangle.abstract_surface_patch(), formatting)?;
+pub fn serialize_triangle<W: Write>(
+    triangle: &Triangle,
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    let attributes = serialize_triangle_attributes(triangle);
 
-    xml_node_parts
-        .content
-        .push(XmlNodeContent::Child(serialize_abstract_ring_property(
-            triangle.exterior(),
-            formatting,
-            GmlElement::ExteriorProperty.into(),
-        )?));
+    xml_fragment_writer.write_start_event_with_attributes(
+        GmlNamespace::Gml,
+        GmlElement::Triangle,
+        attributes,
+    )?;
 
-    Ok(XmlNode::new(GmlElement::Triangle.into(), xml_node_parts))
+    serialize_abstract_surface_patch(triangle.abstract_surface_patch(), xml_fragment_writer)?;
+
+    serialize_abstract_ring_property(
+        triangle.exterior(),
+        xml_fragment_writer,
+        GmlNamespace::Gml,
+        GmlElement::ExteriorProperty,
+    )?;
+
+    xml_fragment_writer.write_end_event(GmlNamespace::Gml, GmlElement::Triangle)?;
+
+    Ok(())
+}
+
+pub fn serialize_triangle_attributes(triangle: &Triangle) -> Vec<(String, String)> {
+    serialize_abstract_surface_patch_attributes(triangle.abstract_surface_patch())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::geometry::primitives::deserialize_triangle;
+    // Test-only convenience: builds the index the real function now
+    // requires, so existing single-argument call sites below don't all
+    // need to construct one by hand.
+    fn deserialize(xml_document: &[u8]) -> Result<super::Triangle, crate::Error> {
+        let index = crate::util::XmlDocumentIndex::from_scan(xml_document, None)?;
+        super::deserialize_triangle(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+    }
+
     use crate::codec::geometry::primitives::triangle::serialize_triangle;
-    use crate::util::Formatting;
+    use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::Triangle;
 
@@ -68,8 +107,7 @@ mod tests {
         </gml:exterior>
     </gml:Triangle>";
 
-        let triangle: Triangle =
-            deserialize_triangle(xml_document.as_ref()).expect("parsing should work");
+        let triangle: Triangle = deserialize(xml_document.as_ref()).expect("parsing should work");
 
         assert_eq!(triangle.a().x(), 354.0249938964844);
         assert_eq!(triangle.a().y(), 978.864990234375);
@@ -79,10 +117,9 @@ mod tests {
     #[test]
     fn serialize_triangle_writes_gml_tags() {
         let triangle = make_triangle();
-        let xml_node = serialize_triangle(&triangle, Formatting::Compact).unwrap();
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("serialization should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_triangle(&triangle, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("valid UTF-8");
 
         assert!(xml.contains("<gml:Triangle"));
         assert!(xml.contains("<gml:exterior"));
@@ -94,13 +131,11 @@ mod tests {
     #[test]
     fn round_trip_triangle_preserves_points() {
         let triangle = make_triangle();
-        let xml_node = serialize_triangle(&triangle, Formatting::Compact).unwrap();
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("serialization should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_triangle(&triangle, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("valid UTF-8");
 
-        let recovered: Triangle =
-            deserialize_triangle(xml.as_bytes()).expect("parsing should work");
+        let recovered: Triangle = deserialize(xml.as_bytes()).expect("parsing should work");
 
         assert_eq!(recovered.a().x(), triangle.a().x());
         assert_eq!(recovered.a().y(), triangle.a().y());
@@ -119,9 +154,10 @@ mod tests {
             <gml:exterior><gml:LinearRing><gml:posList srsDimension=\"3\">1 0 0 0 1 0 0 0 1 1 0 0</gml:posList></gml:LinearRing></gml:exterior>\
             </gml:Triangle>";
 
-        let triangle: Triangle = deserialize_triangle(input_xml.as_bytes()).unwrap();
-        let output_xml_node = serialize_triangle(&triangle, Formatting::Compact).unwrap();
-        let output_xml = output_xml_node.to_string(Formatting::Compact).unwrap();
+        let triangle: Triangle = deserialize(input_xml.as_bytes()).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_triangle(&triangle, &mut xml_fragment_writer).unwrap();
+        let output_xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert_eq!(input_xml, output_xml);
     }
@@ -136,10 +172,11 @@ mod tests {
             DirectPosition::new(355.3919982910156, 978.8480224609375, 2.1084799766540527).unwrap();
         let triangle = Triangle::from_points(a, b, c).unwrap();
 
-        let xml_node = serialize_triangle(&triangle, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_triangle(&triangle, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
-        let recovered = deserialize_triangle(xml.as_bytes()).unwrap();
+        let recovered = deserialize(xml.as_bytes()).unwrap();
 
         assert_eq!(recovered.a().x(), a.x());
         assert_eq!(recovered.a().y(), a.y());

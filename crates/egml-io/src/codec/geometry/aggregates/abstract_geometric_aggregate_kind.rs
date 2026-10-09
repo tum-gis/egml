@@ -1,48 +1,90 @@
 use crate::Error;
+use crate::codec::geometry::aggregates::multi_curve::deserialize_multi_curve;
+use crate::codec::geometry::aggregates::multi_geometry::deserialize_multi_geometry;
+use crate::codec::geometry::aggregates::multi_point::deserialize_multi_point;
+use crate::codec::geometry::aggregates::multi_surface::deserialize_multi_surface;
 use crate::codec::geometry::aggregates::{
-    deserialize_multi_curve, deserialize_multi_geometry, deserialize_multi_point,
-    deserialize_multi_surface, serialize_multi_curve, serialize_multi_geometry,
-    serialize_multi_point, serialize_multi_surface,
+    serialize_multi_curve, serialize_multi_geometry, serialize_multi_point, serialize_multi_surface,
 };
-use crate::util::{Formatting, GmlElement, XmlElementSpans, XmlNode};
+use crate::util::{DeserializationConfig, GmlElement, XmlDocumentIndex, XmlFragmentWriter};
 use egml_core::model::geometry::aggregates::AbstractGeometricAggregateKind;
+use std::io::Write;
 
 pub fn deserialize_abstract_geometric_aggregate_kind(
     xml_document: &[u8],
-    spans: &XmlElementSpans<GmlElement>,
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
 ) -> Result<Option<AbstractGeometricAggregateKind>, Error> {
-    if let Some(span) = spans.first(GmlElement::MultiCurve) {
-        let multi_curve = deserialize_multi_curve(&xml_document[span.start..span.end])?;
+    if let Some(node) = index.first(GmlElement::MultiCurve) {
+        let multi_curve = deserialize_multi_curve(&xml_document[node.range()], node, config)?;
         return Ok(Some(multi_curve.into()));
     }
 
-    if let Some(span) = spans.first(GmlElement::MultiGeometry) {
-        let multi_geometry = deserialize_multi_geometry(&xml_document[span.start..span.end])?;
+    if let Some(node) = index.first(GmlElement::MultiGeometry) {
+        let multi_geometry = deserialize_multi_geometry(&xml_document[node.range()], node, config)?;
         return Ok(Some(multi_geometry.into()));
     }
 
-    if let Some(span) = spans.first(GmlElement::MultiPoint) {
-        let multi_point = deserialize_multi_point(&xml_document[span.start..span.end])?;
+    if let Some(node) = index.first(GmlElement::MultiPoint) {
+        let multi_point = deserialize_multi_point(&xml_document[node.range()], node, config)?;
         return Ok(Some(multi_point.into()));
     }
 
-    if let Some(span) = spans.first(GmlElement::MultiSurface) {
-        let multi_surface = deserialize_multi_surface(&xml_document[span.start..span.end])?;
+    if let Some(node) = index.first(GmlElement::MultiSurface) {
+        let multi_surface = deserialize_multi_surface(&xml_document[node.range()], node, config)?;
         return Ok(Some(multi_surface.into()));
     }
 
     Ok(None)
 }
 
-pub fn serialize_abstract_geometric_aggregate_kind(
+/// See [`deserialize_abstract_ring_kind_for`](crate::codec::geometry::primitives::deserialize_abstract_ring_kind_for):
+/// deserializes `node` as an [`AbstractGeometricAggregateKind`] given that
+/// `element` is already known to be its own type.
+pub fn deserialize_abstract_geometric_aggregate_kind_for(
+    element: GmlElement,
+    xml_document: &[u8],
+    node: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<Option<AbstractGeometricAggregateKind>, Error> {
+    match element {
+        GmlElement::MultiCurve => {
+            let multi_curve = deserialize_multi_curve(xml_document, node, config)?;
+            Ok(Some(multi_curve.into()))
+        }
+        GmlElement::MultiGeometry => {
+            let multi_geometry = deserialize_multi_geometry(xml_document, node, config)?;
+            Ok(Some(multi_geometry.into()))
+        }
+        GmlElement::MultiPoint => {
+            let multi_point = deserialize_multi_point(xml_document, node, config)?;
+            Ok(Some(multi_point.into()))
+        }
+        GmlElement::MultiSurface => {
+            let multi_surface = deserialize_multi_surface(xml_document, node, config)?;
+            Ok(Some(multi_surface.into()))
+        }
+        _ => Ok(None),
+    }
+}
+
+pub fn serialize_abstract_geometric_aggregate_kind<W: Write>(
     abstract_geometric_aggregate_kind: &AbstractGeometricAggregateKind,
-    formatting: Formatting,
-) -> Result<XmlNode, Error> {
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
     match abstract_geometric_aggregate_kind {
-        AbstractGeometricAggregateKind::MultiCurve(x) => serialize_multi_curve(x, formatting),
-        AbstractGeometricAggregateKind::MultiGeometry(x) => serialize_multi_geometry(x, formatting),
-        AbstractGeometricAggregateKind::MultiPoint(x) => serialize_multi_point(x, formatting),
-        AbstractGeometricAggregateKind::MultiSurface(x) => serialize_multi_surface(x, formatting),
+        AbstractGeometricAggregateKind::MultiCurve(x) => {
+            serialize_multi_curve(x, xml_fragment_writer)
+        }
+        AbstractGeometricAggregateKind::MultiGeometry(x) => {
+            serialize_multi_geometry(x, xml_fragment_writer)
+        }
+        AbstractGeometricAggregateKind::MultiPoint(x) => {
+            serialize_multi_point(x, xml_fragment_writer)
+        }
+        AbstractGeometricAggregateKind::MultiSurface(x) => {
+            serialize_multi_surface(x, xml_fragment_writer)
+        }
     }
 }
 
@@ -51,15 +93,14 @@ mod tests {
     use super::{
         deserialize_abstract_geometric_aggregate_kind, serialize_abstract_geometric_aggregate_kind,
     };
-    use crate::util::{Formatting, extract_xml_element_spans};
+    use crate::util::{Formatting, XmlDocumentIndex, XmlFragmentWriter};
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::aggregates::{
         AbstractGeometricAggregateKind, MultiCurve, MultiPoint, MultiSurface,
     };
     use egml_core::model::geometry::primitives::{
-        AbstractCurveKind, AbstractCurveProperty, AbstractRingKind, AbstractRingProperty,
-        AbstractSurfaceKind, AbstractSurfaceProperty, LineString, LinearRing, Point, PointProperty,
-        Polygon,
+        AbstractCurveKind, AbstractCurveProperty, AbstractRingKind, AbstractSurfaceKind,
+        AbstractSurfaceProperty, LineString, LinearRing, Point, PointProperty, Polygon,
     };
 
     fn make_multi_point() -> MultiPoint {
@@ -89,7 +130,7 @@ mod tests {
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
         let ring = AbstractRingKind::LinearRing(LinearRing::new(points).unwrap());
-        let polygon = Polygon::new(Some(AbstractRingProperty::from_object(ring)), []).unwrap();
+        let polygon = Polygon::new(Some(ring), []).unwrap();
         MultiSurface::new([AbstractSurfaceProperty::from_object(
             AbstractSurfaceKind::Polygon(polygon),
         )])
@@ -104,10 +145,14 @@ mod tests {
             </gml:MultiPoint>\
             </gml:someParent>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let kind = deserialize_abstract_geometric_aggregate_kind(xml, &spans)
-            .unwrap()
-            .unwrap();
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let kind = deserialize_abstract_geometric_aggregate_kind(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
         assert!(matches!(
             kind,
@@ -123,10 +168,14 @@ mod tests {
             </gml:MultiCurve>\
             </gml:someParent>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let kind = deserialize_abstract_geometric_aggregate_kind(xml, &spans)
-            .unwrap()
-            .unwrap();
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let kind = deserialize_abstract_geometric_aggregate_kind(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
         assert!(matches!(
             kind,
@@ -144,10 +193,14 @@ mod tests {
             </gml:MultiSurface>\
             </gml:someParent>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let kind = deserialize_abstract_geometric_aggregate_kind(xml, &spans)
-            .unwrap()
-            .unwrap();
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let kind = deserialize_abstract_geometric_aggregate_kind(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
         assert!(matches!(
             kind,
@@ -159,8 +212,13 @@ mod tests {
     fn deserialize_returns_none_when_no_aggregate() {
         let xml = b"<gml:someParent/>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let kind = deserialize_abstract_geometric_aggregate_kind(xml, &spans).unwrap();
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let kind = deserialize_abstract_geometric_aggregate_kind(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap();
 
         assert!(kind.is_none());
     }
@@ -168,9 +226,9 @@ mod tests {
     #[test]
     fn serialize_multi_point_kind() {
         let kind = AbstractGeometricAggregateKind::MultiPoint(make_multi_point());
-        let xml_node =
-            serialize_abstract_geometric_aggregate_kind(&kind, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometric_aggregate_kind(&kind, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert!(xml.contains("<gml:MultiPoint"));
         assert!(xml.contains("<gml:pointMember"));
@@ -180,9 +238,9 @@ mod tests {
     #[test]
     fn serialize_multi_curve_kind() {
         let kind = AbstractGeometricAggregateKind::MultiCurve(make_multi_curve());
-        let xml_node =
-            serialize_abstract_geometric_aggregate_kind(&kind, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometric_aggregate_kind(&kind, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert!(xml.contains("<gml:MultiCurve"));
         assert!(xml.contains("<gml:curveMember"));
@@ -192,9 +250,9 @@ mod tests {
     #[test]
     fn serialize_multi_surface_kind() {
         let kind = AbstractGeometricAggregateKind::MultiSurface(make_multi_surface());
-        let xml_node =
-            serialize_abstract_geometric_aggregate_kind(&kind, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometric_aggregate_kind(&kind, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert!(xml.contains("<gml:MultiSurface"));
         assert!(xml.contains("<gml:surfaceMember"));
@@ -204,15 +262,19 @@ mod tests {
     #[test]
     fn round_trip_multi_point_kind() {
         let kind = AbstractGeometricAggregateKind::MultiPoint(make_multi_point());
-        let xml_node =
-            serialize_abstract_geometric_aggregate_kind(&kind, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometric_aggregate_kind(&kind, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         let wrapper = format!("<gml:parent>{xml}</gml:parent>");
-        let spans = extract_xml_element_spans(wrapper.as_bytes()).unwrap();
-        let recovered = deserialize_abstract_geometric_aggregate_kind(wrapper.as_bytes(), &spans)
-            .unwrap()
-            .unwrap();
+        let index = XmlDocumentIndex::from_scan(wrapper.as_bytes(), None).unwrap();
+        let recovered = deserialize_abstract_geometric_aggregate_kind(
+            wrapper.as_bytes(),
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
         assert!(matches!(
             recovered,
@@ -223,15 +285,19 @@ mod tests {
     #[test]
     fn round_trip_multi_surface_kind() {
         let kind = AbstractGeometricAggregateKind::MultiSurface(make_multi_surface());
-        let xml_node =
-            serialize_abstract_geometric_aggregate_kind(&kind, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometric_aggregate_kind(&kind, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         let wrapper = format!("<gml:parent>{xml}</gml:parent>");
-        let spans = extract_xml_element_spans(wrapper.as_bytes()).unwrap();
-        let recovered = deserialize_abstract_geometric_aggregate_kind(wrapper.as_bytes(), &spans)
-            .unwrap()
-            .unwrap();
+        let index = XmlDocumentIndex::from_scan(wrapper.as_bytes(), None).unwrap();
+        let recovered = deserialize_abstract_geometric_aggregate_kind(
+            wrapper.as_bytes(),
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
         assert!(matches!(
             recovered,

@@ -1,74 +1,77 @@
 use crate::Error;
-use crate::codec::base::{
-    GmlAssociationAttributes, GmlOwnershipAttributes, serialize_association_attributes,
-    serialize_ownership_attributes,
-};
 use crate::codec::geometry::primitives::{
     deserialize_abstract_ring_kind, serialize_abstract_ring_kind,
 };
-use crate::util::{Formatting, GmlElement, XmlElementSpans, XmlNode, XmlNodeContent, XmlNodeParts};
-use egml_core::model::base::{HasAssociationAttributes, HasOwnershipAttributes};
-use egml_core::model::geometry::primitives::AbstractRingProperty;
-use quick_xml::de;
-use serde::{Deserialize, Serialize};
+use crate::util::{
+    DeserializationConfig, GmlElement, XmlDocumentIndex, XmlElement, XmlFragmentWriter,
+    XmlNamespace,
+};
+use egml_core::model::geometry::primitives::AbstractRingKind;
+use std::io::Write;
 
+/// Deserializes a `gml:AbstractRingPropertyType` element (e.g. `gml:exterior`)
+/// into the ring it wraps.
+///
+/// The property type carries no attributes and its ring is mandatory.
+///
+/// # Errors
+///
+/// Returns [`Error::MissingLinearRing`] if the element contains no supported ring.
 pub fn deserialize_abstract_ring_property(
     xml_document: &[u8],
-    spans: &XmlElementSpans<GmlElement>,
-) -> Result<AbstractRingProperty, Error> {
-    let parsed: GmlAbstractRingProperty = de::from_reader(xml_document)?;
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<AbstractRingKind, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
 
-    let object = deserialize_abstract_ring_kind(xml_document, spans)?;
-
-    Ok(AbstractRingProperty::new(
-        object,
-        parsed.association.try_into()?,
-        parsed.ownership.into(),
-    ))
+    deserialize_abstract_ring_kind(xml_document, index, config)?.ok_or(Error::MissingLinearRing)
 }
 
-pub fn serialize_abstract_ring_property(
-    abstract_ring_property: &AbstractRingProperty,
-    formatting: Formatting,
-    target_xml_element: &'static str,
-) -> Result<XmlNode, Error> {
-    let mut parts = XmlNodeParts::empty();
-
-    parts.attributes.extend(serialize_association_attributes(
-        abstract_ring_property.association(),
-    ));
-    parts.attributes.extend(serialize_ownership_attributes(
-        abstract_ring_property.ownership(),
-    ));
-
-    if let Some(object) = abstract_ring_property.object() {
-        parts
-            .content
-            .push(XmlNodeContent::Child(serialize_abstract_ring_kind(
-                object, formatting,
-            )?));
-    }
-
-    Ok(XmlNode::new(target_xml_element, parts))
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub struct GmlAbstractRingProperty {
-    #[serde(flatten)]
-    pub association: GmlAssociationAttributes,
-    #[serde(flatten)]
-    pub ownership: GmlOwnershipAttributes,
+/// Serializes `ring` wrapped in a `gml:AbstractRingPropertyType` element.
+pub fn serialize_abstract_ring_property<N: XmlNamespace, E: XmlElement, W: Write>(
+    ring: &AbstractRingKind,
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+    target_xml_namespace: N,
+    target_xml_element: E,
+) -> Result<(), Error> {
+    xml_fragment_writer.write_start_event(target_xml_namespace, target_xml_element)?;
+    serialize_abstract_ring_kind(ring, xml_fragment_writer)?;
+    xml_fragment_writer.write_end_event(target_xml_namespace, target_xml_element)?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::Error;
     use crate::codec::geometry::primitives::{
         deserialize_abstract_ring_property, serialize_abstract_ring_property,
     };
-    use crate::util::{Formatting, GmlElement, extract_xml_element_spans};
-    use egml_core::model::base::{HasAssociationAttributes, HasOwnershipAttributes};
-    use egml_core::model::geometry::primitives::{AbstractRingKind, AbstractRingProperty};
-    use egml_core::model::xlink::{ActuateType, HRef, ShowType};
+    use crate::util::{
+        DeserializationConfig, Formatting, GmlElement, GmlNamespace, XmlDocumentIndex,
+        XmlFragmentWriter,
+    };
+    use egml_core::model::geometry::primitives::AbstractRingKind;
+
+    fn deserialize(xml_document: &[u8]) -> Result<AbstractRingKind, Error> {
+        let index = XmlDocumentIndex::from_scan(xml_document, None).expect("should index");
+        deserialize_abstract_ring_property(xml_document, &index, &DeserializationConfig::default())
+    }
+
+    fn serialize(ring: &AbstractRingKind) -> String {
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_ring_property(
+            ring,
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::ExteriorProperty,
+        )
+        .expect("should serialize");
+        String::from_utf8(xml_fragment_writer.into_bytes()).expect("valid UTF-8")
+    }
 
     #[test]
     fn deserialize_ring_property_as_linear_ring() {
@@ -81,15 +84,9 @@ mod tests {
    </gml:LinearRing>
 </gml:exterior>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("should extract spans");
-        let mut abstract_ring_property: AbstractRingProperty =
-            deserialize_abstract_ring_property(xml_document.as_ref(), &spans)
-                .expect("should deserialize");
-        let abstract_ring_kind = abstract_ring_property
-            .take_object()
-            .expect("should be there");
-
-        let AbstractRingKind::LinearRing(linear_ring) = abstract_ring_kind else {
+        let AbstractRingKind::LinearRing(linear_ring) =
+            deserialize(xml_document).expect("should deserialize")
+        else {
             panic!("expected LinearRing variant");
         };
 
@@ -97,74 +94,52 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_ring_property_as_ring() {
-        let xml_document = b"<gml:exterior>
-   <gml:Ring>
-       <gml:curveMember>
-          <gml:LineString>
-              <gml:pos>0.0 0.0 0.0</gml:pos>
-              <gml:pos>1.0 1.0 0.0</gml:pos>
-              <gml:pos>1.0 1.0 1.0</gml:pos>
-              <gml:pos>0.0 0.0 0.0</gml:pos>
-          </gml:LineString>
-       </gml:curveMember>
-    </gml:Ring>
-</gml:exterior>";
+    fn deserialize_unsupported_ring_is_an_error() {
+        // gml:Ring deserialization is not yet implemented.
+        let xml_document = b"<gml:exterior><gml:Ring><gml:curveMember><gml:LineString>\
+            <gml:pos>0 0 0</gml:pos><gml:pos>1 1 0</gml:pos><gml:pos>1 1 1</gml:pos>\
+            <gml:pos>0 0 0</gml:pos></gml:LineString></gml:curveMember></gml:Ring></gml:exterior>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("should extract spans");
-        let property = deserialize_abstract_ring_property(xml_document.as_ref(), &spans)
-            .expect("should deserialize");
-        // Ring deserialization is not yet implemented; object will be None
-        assert!(property.object().is_none());
+        assert!(matches!(
+            deserialize(xml_document),
+            Err(Error::MissingLinearRing)
+        ));
     }
 
     #[test]
-    fn deserialize_with_full_association_and_ownership_attributes() {
-        let xml_document = b"<gml:exterior xlink:href=\"#some-id\" xlink:title=\"Some Title\" \
-            xlink:role=\"http://example.com/role\" xlink:arcrole=\"http://example.com/arcrole\" \
-            xlink:show=\"new\" xlink:actuate=\"onLoad\" gml:owns=\"true\"/>";
-
-        let spans = extract_xml_element_spans(xml_document).unwrap();
-        let property = deserialize_abstract_ring_property(xml_document, &spans).unwrap();
-
-        assert_eq!(property.href(), Some(&HRef::from_local("some-id")));
-        assert_eq!(property.title().as_deref(), Some("Some Title"));
-        assert_eq!(property.role().as_deref(), Some("http://example.com/role"));
-        assert_eq!(
-            property.arcrole().as_deref(),
-            Some("http://example.com/arcrole")
-        );
-        assert_eq!(property.show(), Some(&ShowType::New));
-        assert_eq!(property.actuate(), Some(&ActuateType::OnLoad));
-        assert!(property.owns());
-        assert!(property.object().is_none());
+    fn deserialize_empty_property_is_an_error() {
+        assert!(matches!(
+            deserialize(b"<gml:exterior/>"),
+            Err(Error::MissingLinearRing)
+        ));
     }
 
     #[test]
-    fn round_trip_preserves_full_association_and_ownership_attributes() {
-        let xml_document = b"<gml:exterior xlink:href=\"#some-id\" xlink:title=\"Some Title\" \
-            xlink:role=\"http://example.com/role\" xlink:arcrole=\"http://example.com/arcrole\" \
-            xlink:show=\"new\" xlink:actuate=\"onLoad\" gml:owns=\"true\"/>";
+    fn deserialize_ignores_xlink_and_ownership_attributes() {
+        // gml:AbstractRingPropertyType declares neither attribute group; tolerate them in input.
+        let xml_document = b"<gml:exterior xlink:href=\"#some-id\" xlink:title=\"Some Title\" gml:owns=\"true\"><gml:LinearRing>\
+            <gml:posList srsDimension=\"3\">0 0 0 1 0 0 0 1 0 0 0 0</gml:posList>\
+            </gml:LinearRing></gml:exterior>";
 
-        let spans = extract_xml_element_spans(xml_document).unwrap();
-        let property = deserialize_abstract_ring_property(xml_document, &spans).unwrap();
+        let ring = deserialize(xml_document).expect("should deserialize");
 
-        let xml_node = serialize_abstract_ring_property(
-            &property,
-            Formatting::Compact,
-            GmlElement::ExteriorProperty.into(),
-        )
-        .unwrap();
-        let output = xml_node.to_string(Formatting::Compact).unwrap();
+        assert_eq!(ring.points().len(), 3);
+        assert!(!serialize(&ring).contains("xlink"));
+    }
 
-        let spans2 = extract_xml_element_spans(output.as_bytes()).unwrap();
-        let recovered = deserialize_abstract_ring_property(output.as_bytes(), &spans2).unwrap();
+    #[test]
+    fn round_trip_preserves_ring() {
+        let xml_document = b"<gml:exterior><gml:LinearRing>\
+            <gml:posList srsDimension=\"3\">0 0 0 1 0 0 0 1 0 0 0 0</gml:posList>\
+            </gml:LinearRing></gml:exterior>";
+        let ring = deserialize(xml_document).expect("should deserialize");
 
+        let output = serialize(&ring);
+
+        assert!(output.starts_with("<gml:exterior><gml:LinearRing"));
         assert_eq!(
-            recovered.association(),
-            property.association(),
-            "association attributes did not survive the round trip; output was: {output}"
+            deserialize(output.as_bytes()).expect("should deserialize"),
+            ring
         );
-        assert_eq!(recovered.ownership(), property.ownership());
     }
 }

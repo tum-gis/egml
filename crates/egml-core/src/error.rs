@@ -108,13 +108,6 @@ pub enum Error {
     /// Returned when an operation requires an exterior ring but the polygon has none.
     MissingExteriorRing,
 
-    /// Returned when a ring property carries only an xlink:href reference and the
-    /// referenced geometry object has not been resolved into an inline object.
-    ///
-    /// `href` is the reference value if one was present, or `None` if the property
-    /// has neither an inline object nor a reference.
-    UnresolvedRingReference { href: Option<String> },
-
     /// Returned when a surface property carries only an xlink:href reference and the
     /// referenced geometry object has not been resolved into an inline object.
     ///
@@ -132,13 +125,6 @@ pub enum Error {
     /// Returned when an operation requires an exterior shell but the solid has none.
     MissingExteriorShell,
 
-    /// Returned when a shell property carries only an xlink:href reference and the
-    /// referenced geometry object has not been resolved into an inline object.
-    ///
-    /// `href` is the reference value if one was present, or `None` if the property
-    /// has neither an inline object nor a reference.
-    UnresolvedShellReference { href: Option<String> },
-
     /// Returned when `triangulate` is called on a geometry type that cannot
     /// produce a surface (e.g. `Point`, `MultiCurve`).
     ///
@@ -155,6 +141,25 @@ pub enum Error {
         attribute: &'static str,
         value: String,
     },
+
+    /// Returned when a timezone offset is not a whole number of minutes or lies
+    /// outside the range `-14:00..=+14:00` permitted by
+    /// [XSD 1.1 Part 2 §3.3.7](https://www.w3.org/TR/xmlschema11-2/#dateTime).
+    ///
+    /// `seconds` is the offset east of UTC that was supplied.
+    InvalidTimezoneOffset { seconds: i32 },
+
+    /// Returned when a local date-time cannot be represented in UTC with the
+    /// given offset because it lies at the edge of the supported range.
+    ///
+    /// `value` describes the local date-time and offset that were supplied.
+    DateTimeOutOfRange { value: String },
+
+    /// Returned when date or time fields do not form a valid calendar value,
+    /// e.g. February 30, hour 24 or minute 60.
+    ///
+    /// `value` lists the fields that were supplied.
+    InvalidDateTimeFields { value: String },
 }
 
 impl fmt::Display for Error {
@@ -244,14 +249,6 @@ impl fmt::Display for Error {
                 "polygon has no exterior ring; \
                  operation requires a defined outer boundary (OGC 07-036 §10.5.6)"
             ),
-            Error::UnresolvedRingReference { href: Some(href) } => write!(
-                f,
-                "ring property references '{href}' via xlink:href but the object has not been resolved"
-            ),
-            Error::UnresolvedRingReference { href: None } => write!(
-                f,
-                "ring property has neither an inline object nor an xlink:href reference"
-            ),
             Error::UnresolvedSurfaceReference { href: Some(href) } => write!(
                 f,
                 "surface property references '{href}' via xlink:href but the object has not been resolved"
@@ -273,20 +270,23 @@ impl fmt::Display for Error {
                 "solid has no exterior shell; \
                  operation requires a defined outer boundary (OGC 07-036 §10.6.4)"
             ),
-            Error::UnresolvedShellReference { href: Some(href) } => write!(
-                f,
-                "shell property references '{href}' via xlink:href but the object has not been resolved"
-            ),
-            Error::UnresolvedShellReference { href: None } => write!(
-                f,
-                "shell property has neither an inline object nor an xlink:href reference"
-            ),
             Error::TriangulationNotSupported { geometry } => write!(
                 f,
                 "triangulation is not supported for geometry type '{geometry}'"
             ),
             Error::InvalidAttributeValue { attribute, value } => {
                 write!(f, "invalid value '{value}' for attribute '{attribute}'")
+            }
+            Error::InvalidTimezoneOffset { seconds } => write!(
+                f,
+                "timezone offset of {seconds} s is invalid; \
+                 XSD requires whole minutes within -14:00..=+14:00"
+            ),
+            Error::DateTimeOutOfRange { value } => {
+                write!(f, "date-time '{value}' is outside the supported range")
+            }
+            Error::InvalidDateTimeFields { value } => {
+                write!(f, "fields {value} do not form a valid date or time")
             }
         }
     }

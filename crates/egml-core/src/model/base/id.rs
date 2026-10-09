@@ -11,7 +11,7 @@ use uuid::Uuid;
 /// bytes or strings by hashing them with SHA-256, or generated as a
 /// random UUID v4.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub struct Id(String);
+pub struct Id(Box<str>);
 
 impl Id {
     /// Constructs an `Id` by hashing bytes using SHA-256.
@@ -27,7 +27,7 @@ impl Id {
     /// assert_eq!(id.as_str().len(), 64);
     /// ```
     pub fn from_hashed_bytes(val: impl AsRef<[u8]>) -> Self {
-        Self(Self::hash_bytes_to_hex(val.as_ref()))
+        Self(Self::hash_bytes_to_hex(val.as_ref()).into_boxed_str())
     }
 
     /// Constructs an `Id` by hashing a string using SHA-256.
@@ -54,6 +54,8 @@ impl Id {
 
     /// Generates a random UUID v4 as an `Id`.
     ///
+    /// Requires the `random-id` feature.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -62,8 +64,9 @@ impl Id {
     /// let id = Id::generate_uuid_v4();
     /// assert!(!id.as_str().is_empty());
     /// ```
+    #[cfg(feature = "random-id")]
     pub fn generate_uuid_v4() -> Self {
-        Self(Uuid::new_v4().to_string())
+        Self(Uuid::new_v4().to_string().into_boxed_str())
     }
 
     /// Generates a time-ordered UUID v7 as an `Id`.
@@ -71,6 +74,8 @@ impl Id {
     /// v7 encodes a millisecond-precision Unix timestamp in the high bits,
     /// making ids lexicographically sortable by creation time — preferable
     /// over v4 when ids are stored in a database index.
+    ///
+    /// Requires the `random-id` feature.
     ///
     /// # Examples
     ///
@@ -81,8 +86,9 @@ impl Id {
     /// let b = Id::generate_uuid_v7();
     /// assert!(a.as_str() <= b.as_str());
     /// ```
+    #[cfg(feature = "random-id")]
     pub fn generate_uuid_v7() -> Self {
-        Self(Uuid::now_v7().to_string())
+        Self(Uuid::now_v7().to_string().into_boxed_str())
     }
 
     /// Generates a deterministic UUID v5 from a namespace and a name.
@@ -102,7 +108,11 @@ impl Id {
     /// assert_eq!(id_a, id_b);
     /// ```
     pub fn generate_uuid_v5(namespace: &Uuid, name: &str) -> Self {
-        Self(Uuid::new_v5(namespace, name.as_bytes()).to_string())
+        Self(
+            Uuid::new_v5(namespace, name.as_bytes())
+                .to_string()
+                .into_boxed_str(),
+        )
     }
 
     /// Returns the id as a string slice.
@@ -134,7 +144,7 @@ impl Id {
 
 impl From<Id> for String {
     fn from(item: Id) -> Self {
-        item.0
+        item.0.into_string()
     }
 }
 
@@ -146,7 +156,7 @@ impl TryFrom<&str> for Id {
     /// Returns [`Error::EmptyId`] if the string slice is empty.
     fn try_from(item: &str) -> Result<Self, Self::Error> {
         Self::validate(item)?;
-        Ok(Self(item.to_string()))
+        Ok(Self(item.into()))
     }
 }
 
@@ -158,7 +168,7 @@ impl TryFrom<String> for Id {
     /// Returns [`Error::EmptyId`] if the owned string is empty.
     fn try_from(item: String) -> Result<Self, Self::Error> {
         Self::validate(&item)?;
-        Ok(Self(item))
+        Ok(Self(item.into_boxed_str()))
     }
 }
 

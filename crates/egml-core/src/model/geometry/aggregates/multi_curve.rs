@@ -205,7 +205,9 @@ mod tests {
     use super::*;
     use crate::Error;
     use crate::model::geometry::DirectPosition;
-    use crate::model::geometry::primitives::{AbstractCurveKind, LineString};
+    use crate::model::geometry::primitives::{
+        AbstractCurveKind, AbstractRingKind, LineString, LinearRing,
+    };
 
     fn line_string(points: Vec<DirectPosition>) -> AbstractCurveProperty {
         AbstractCurveProperty::from_object(AbstractCurveKind::LineString(
@@ -228,6 +230,29 @@ mod tests {
         ])
         .unwrap();
         assert!((multi_curve.length_3d().unwrap() - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn length_3d_with_ring_member() {
+        // Unit-square ring (perimeter 4) plus a unit segment — total length 5.
+        let ring = LinearRing::new([
+            DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 1.0, 0.0).unwrap(),
+            DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
+        ])
+        .unwrap();
+        let multi_curve = MultiCurve::new([
+            AbstractCurveProperty::from_object(AbstractCurveKind::AbstractRingKind(
+                AbstractRingKind::LinearRing(ring),
+            )),
+            line_string(vec![
+                DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+                DirectPosition::new(0.0, 0.0, 1.0).unwrap(),
+            ]),
+        ])
+        .unwrap();
+        assert!((multi_curve.length_3d().unwrap() - 5.0).abs() < 1e-10);
     }
 
     #[test]

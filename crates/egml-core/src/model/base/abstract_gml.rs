@@ -13,7 +13,10 @@ pub struct AbstractGml {
     /// Optional stable identifier for this GML object.
     id: Option<Id>,
     /// Human-readable names associated with this GML object.
-    names: Vec<Code>,
+    ///
+    /// Stored as a boxed slice: names are rarely present and rarely modified,
+    /// so dropping `Vec`'s capacity field saves 8 bytes on every GML object.
+    names: Box<[Code]>,
 }
 
 impl AbstractGml {
@@ -37,7 +40,7 @@ impl AbstractGml {
         Self {
             abstract_object,
             id: None,
-            names: Vec::new(),
+            names: Box::default(),
         }
     }
 
@@ -116,15 +119,18 @@ pub trait AsAbstractGmlMut: AsAbstractObjectMut + AsAbstractGml {
     }
 
     fn set_names(&mut self, names: Vec<Code>) {
-        self.abstract_gml_mut().names = names;
+        self.abstract_gml_mut().names = names.into_boxed_slice();
     }
 
+    /// Appends a name. Reallocates the name list on every call.
     fn push_name(&mut self, name: Code) {
-        self.abstract_gml_mut().names.push(name);
+        self.extend_names([name]);
     }
 
+    /// Appends names. Reallocates the name list once per call.
     fn extend_names(&mut self, names: impl IntoIterator<Item = Code>) {
-        self.abstract_gml_mut().names.extend(names);
+        let current = std::mem::take(&mut self.abstract_gml_mut().names);
+        self.abstract_gml_mut().names = current.into_vec().into_iter().chain(names).collect();
     }
 }
 
@@ -165,3 +171,28 @@ macro_rules! impl_abstract_gml_mut_traits {
 
 impl_abstract_gml_traits!(AbstractGml);
 impl_abstract_gml_mut_traits!(AbstractGml);
+
+#[cfg(test)]
+mod tests {
+    use super::{AbstractGml, AsAbstractGml, AsAbstractGmlMut};
+    use crate::model::basic_types::Code;
+
+    #[test]
+    fn push_name_appends_in_order() {
+        let mut gml = AbstractGml::new();
+        gml.push_name("a".into());
+        gml.push_name("b".into());
+        assert_eq!(gml.names(), [Code::from("a"), Code::from("b")]);
+    }
+
+    #[test]
+    fn extend_names_keeps_existing_names() {
+        let mut gml = AbstractGml::new();
+        gml.set_names(vec!["a".into()]);
+        gml.extend_names(["b".into(), "c".into()]);
+        assert_eq!(
+            gml.names(),
+            [Code::from("a"), Code::from("b"), Code::from("c")]
+        );
+    }
+}

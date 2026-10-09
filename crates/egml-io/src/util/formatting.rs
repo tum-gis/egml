@@ -7,5 +7,5 @@ pub enum Formatting {
     #[default]
     NewLine,
     /// Each element on its own line, indented by `size` repetitions of `char`.
-    Indent { char: char, size: usize },
+    Indent { char: u8, size: usize },
 }

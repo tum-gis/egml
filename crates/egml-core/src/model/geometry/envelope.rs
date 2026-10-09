@@ -1,12 +1,12 @@
 use crate::error::Error;
 use crate::model::AbstractObject;
 use crate::model::common::{ApplyTransform, Triangulate, Triangulation};
-use crate::model::geometry::DirectPosition;
+use crate::model::geometry::primitives::AbstractSurfaceKind;
 use crate::model::geometry::primitives::{AbstractRingKind, Shell};
 use crate::model::geometry::primitives::{
-    AbstractRingProperty, AbstractSurfaceProperty, LinearRing, Polygon, Solid, TriangulatedSurface,
+    AbstractSurfaceProperty, LinearRing, Polygon, Solid, TriangulatedSurface,
 };
-use crate::model::geometry::primitives::{AbstractSurfaceKind, ShellProperty};
+use crate::model::geometry::{DirectPosition, SrsReferenceGroup};
 use nalgebra::{Isometry3, Point3, Rotation3, Scale3, Transform3, Vector3};
 use std::fmt;
 
@@ -22,8 +22,7 @@ pub struct Envelope {
     abstract_object: AbstractObject,
     lower_corner: DirectPosition,
     upper_corner: DirectPosition,
-    srs_name: Option<String>,
-    srs_dimension: Option<u8>,
+    srs_reference_group: SrsReferenceGroup,
 }
 
 impl Envelope {
@@ -72,8 +71,7 @@ impl Envelope {
             abstract_object: AbstractObject::default(),
             lower_corner,
             upper_corner,
-            srs_name: None,
-            srs_dimension: None,
+            srs_reference_group: SrsReferenceGroup::default(),
         })
     }
 
@@ -98,8 +96,7 @@ impl Envelope {
             abstract_object: AbstractObject::default(),
             lower_corner,
             upper_corner,
-            srs_name: None,
-            srs_dimension: None,
+            srs_reference_group: SrsReferenceGroup::default(),
         }
     }
 
@@ -121,46 +118,57 @@ impl Envelope {
         self.upper_corner = upper_corner;
     }
 
+    /// Returns the SRS reference group (`srsName`, `srsDimension`) of this envelope.
+    pub fn srs_reference_group(&self) -> &SrsReferenceGroup {
+        &self.srs_reference_group
+    }
+
+    /// Replaces the SRS reference group of this envelope.
+    pub fn set_srs_reference_group(&mut self, srs_reference_group: SrsReferenceGroup) {
+        self.srs_reference_group = srs_reference_group;
+    }
+
     /// Returns the SRS name identifying the CRS of this envelope's coordinates,
     /// or `None` if unspecified.
     pub fn srs_name(&self) -> Option<&str> {
-        self.srs_name.as_deref()
+        self.srs_reference_group.srs_name()
     }
 
     /// Returns the coordinate dimension of this envelope's positions,
     /// or `None` if unspecified.
-    pub fn srs_dimension(&self) -> Option<u8> {
-        self.srs_dimension
+    pub fn srs_dimension(&self) -> Option<u32> {
+        self.srs_reference_group.srs_dimension()
     }
 
     /// Sets the SRS name identifying the CRS (e.g. `"urn:ogc:def:crs:EPSG::25832"`).
     pub fn set_srs_name(&mut self, srs_name: impl Into<String>) {
-        self.srs_name = Some(srs_name.into());
+        self.srs_reference_group.set_srs_name(srs_name);
     }
 
     /// Sets or clears the SRS name.
     pub fn set_srs_name_opt(&mut self, srs_name: Option<String>) {
-        self.srs_name = srs_name;
+        self.srs_reference_group.set_srs_name_opt(srs_name);
     }
 
     /// Clears the SRS name.
     pub fn clear_srs_name(&mut self) {
-        self.srs_name = None;
+        self.srs_reference_group.clear_srs_name();
     }
 
     /// Sets the coordinate dimension of this envelope's positions (typically `2` or `3`).
-    pub fn set_srs_dimension(&mut self, srs_dimension: u8) {
-        self.srs_dimension = Some(srs_dimension);
+    pub fn set_srs_dimension(&mut self, srs_dimension: u32) {
+        self.srs_reference_group.set_srs_dimension(srs_dimension);
     }
 
     /// Sets or clears the coordinate dimension.
-    pub fn set_srs_dimension_opt(&mut self, srs_dimension: Option<u8>) {
-        self.srs_dimension = srs_dimension;
+    pub fn set_srs_dimension_opt(&mut self, srs_dimension: Option<u32>) {
+        self.srs_reference_group
+            .set_srs_dimension_opt(srs_dimension);
     }
 
     /// Clears the coordinate dimension.
     pub fn clear_srs_dimension(&mut self) {
-        self.srs_dimension = None;
+        self.srs_reference_group.clear_srs_dimension();
     }
 
     /// Returns the diagonal vector from the lower corner to the upper corner.
@@ -409,13 +417,8 @@ impl Envelope {
             .into_iter()
             .map(|points| {
                 let ring = LinearRing::new(points).ok()?;
-                let polygon = Polygon::new(
-                    Some(AbstractRingProperty::from_object(
-                        AbstractRingKind::LinearRing(ring),
-                    )),
-                    vec![],
-                )
-                .ok()?;
+                let polygon =
+                    Polygon::new(Some(AbstractRingKind::LinearRing(ring)), vec![]).ok()?;
                 Some(AbstractSurfaceProperty::from_object(
                     AbstractSurfaceKind::Polygon(polygon),
                 ))
@@ -423,9 +426,7 @@ impl Envelope {
             .collect::<Option<_>>()
             .expect("envelope corners are finite and valid");
         let shell = Shell::new(members).expect("envelope is valid");
-        let shell_property = ShellProperty::from_object(shell);
-
-        let solid = Solid::new(Some(shell_property)).expect("envelope is valid");
+        let solid = Solid::new(Some(shell)).expect("envelope is valid");
         Ok(solid)
     }
 
@@ -482,14 +483,10 @@ impl Envelope {
         };
 
         let ring = LinearRing::new(points).expect("envelope corners are finite and valid");
-        Polygon::new(
-            Some(AbstractRingProperty::from_object(
-                AbstractRingKind::LinearRing(ring),
-            )),
-            vec![],
-        )
-        .map_err(|_| Error::NotASurface {
-            non_zero_extents: self.non_zero_extents(),
+        Polygon::new(Some(AbstractRingKind::LinearRing(ring)), vec![]).map_err(|_| {
+            Error::NotASurface {
+                non_zero_extents: self.non_zero_extents(),
+            }
         })
     }
 
@@ -510,8 +507,6 @@ impl Envelope {
             self.to_solid()?
                 .exterior()
                 .as_ref()
-                .expect("must be created")
-                .object()
                 .expect("must be created")
                 .triangulate()
                 .map(Triangulation::into_surface)

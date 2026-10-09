@@ -1,11 +1,9 @@
 use crate::error::Error;
-use crate::model::base::HasAssociationAttributes;
 use crate::model::common::{
     ApplyTransform, ComputeEnvelope, IterGeometries, Triangulate, Triangulation,
 };
-use crate::model::geometry::primitives::shell_property::ShellProperty;
 use crate::model::geometry::primitives::{
-    AbstractSolid, AsAbstractSolid, AsAbstractSolidMut, TriangulatedSurface,
+    AbstractSolid, AsAbstractSolid, AsAbstractSolidMut, Shell, TriangulatedSurface,
 };
 use crate::model::geometry::refs::AbstractGeometryKindRef;
 use crate::model::geometry::{DirectPosition, Envelope};
@@ -16,12 +14,12 @@ use rayon::prelude::*;
 /// A 3-D geometry bounded by one or more surfaces.
 ///
 /// Corresponds to `gml:Solid` in [OGC 07-036 §10.6.4](https://docs.ogc.org/is/07-036/07-036.pdf).  The bounding surfaces are
-/// stored as [`ShellProperty`] members and may be of any [`AbstractSurfaceKind`](crate::model::geometry::primitives::AbstractSurfaceKind).
+/// stored as [`Shell`] members and may be of any [`AbstractSurfaceKind`](crate::model::geometry::primitives::AbstractSurfaceKind).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Solid {
     pub abstract_solid: AbstractSolid,
-    exterior: Option<ShellProperty>,
-    interior: Vec<ShellProperty>,
+    exterior: Option<Shell>,
+    interior: Vec<Shell>,
 }
 
 impl Solid {
@@ -30,7 +28,7 @@ impl Solid {
     /// # Errors
     ///
     /// Returns [`Error::TooFewElements`] if `members` is empty.
-    pub fn new(exterior: Option<ShellProperty>) -> Result<Self, Error> {
+    pub fn new(exterior: Option<Shell>) -> Result<Self, Error> {
         Ok(Self {
             abstract_solid: AbstractSolid::default(),
             exterior,
@@ -38,10 +36,7 @@ impl Solid {
         })
     }
 
-    pub fn from_abstract_solid(
-        abstract_solid: AbstractSolid,
-        exterior: Option<ShellProperty>,
-    ) -> Self {
+    pub fn from_abstract_solid(abstract_solid: AbstractSolid, exterior: Option<Shell>) -> Self {
         Self {
             abstract_solid,
             exterior,
@@ -49,36 +44,33 @@ impl Solid {
         }
     }
 
-    pub fn exterior(&self) -> Option<&ShellProperty> {
+    pub fn exterior(&self) -> Option<&Shell> {
         self.exterior.as_ref()
     }
 
-    pub fn interior(&self) -> &[ShellProperty] {
+    pub fn interior(&self) -> &[Shell] {
         &self.interior
     }
 
-    pub fn set_interior(&mut self, interior: Vec<ShellProperty>) {
+    pub fn set_interior(&mut self, interior: Vec<Shell>) {
         self.interior = interior;
     }
 
-    pub fn push_interior(&mut self, interior: ShellProperty) {
+    pub fn push_interior(&mut self, interior: Shell) {
         self.interior.push(interior);
     }
 
-    pub fn extend_interiors(&mut self, interiors: impl IntoIterator<Item = ShellProperty>) {
+    pub fn extend_interiors(&mut self, interiors: impl IntoIterator<Item = Shell>) {
         self.interior.extend(interiors);
     }
 }
 
 impl Solid {
     pub fn points(&self) -> Vec<&DirectPosition> {
-        if let Some(exterior) = &self.exterior
-            && let Some(object) = exterior.object()
-        {
-            object.points()
-        } else {
-            Vec::new()
-        }
+        self.exterior
+            .as_ref()
+            .map(|exterior| exterior.points())
+            .unwrap_or_default()
     }
 
     /// Returns the volume of this solid.
@@ -86,102 +78,66 @@ impl Solid {
     /// # Errors
     ///
     /// Returns [`Error::MissingExteriorShell`] if the solid has no exterior shell property.
-    /// Returns [`Error::UnresolvedShellReference`] if the shell property carries only an
-    /// xlink:href that has not been resolved into an inline object.
     /// Propagates any error from triangulating the bounding surfaces.
     pub fn volume_3d(&self) -> Result<f64, Error> {
-        let shell_property = self.exterior.as_ref().ok_or(Error::MissingExteriorShell)?;
-        let shell = shell_property
-            .object()
-            .ok_or_else(|| Error::UnresolvedShellReference {
-                href: shell_property.href().map(|h| h.to_string()),
-            })?;
-        shell.volume_3d()
+        self.exterior
+            .as_ref()
+            .ok_or(Error::MissingExteriorShell)?
+            .volume_3d()
     }
 }
 
 impl ApplyTransform for Solid {
     fn apply_transform(&mut self, transform: Transform3<f64>) {
-        if let Some(exterior) = self.exterior.as_mut()
-            && let Some(object) = exterior.object_mut()
-        {
-            object.apply_transform(transform)
+        if let Some(exterior) = self.exterior.as_mut() {
+            exterior.apply_transform(transform);
         }
-
-        self.interior.par_iter_mut().for_each(|p| {
-            if let Some(object) = p.object_mut() {
-                object.apply_transform(transform);
-            }
-        });
+        self.interior
+            .par_iter_mut()
+            .for_each(|p| p.apply_transform(transform));
     }
 
     fn apply_isometry(&mut self, isometry: Isometry3<f64>) {
-        if let Some(exterior) = self.exterior.as_mut()
-            && let Some(object) = exterior.object_mut()
-        {
-            object.apply_isometry(isometry)
+        if let Some(exterior) = self.exterior.as_mut() {
+            exterior.apply_isometry(isometry);
         }
-
-        self.interior.par_iter_mut().for_each(|p| {
-            if let Some(object) = p.object_mut() {
-                object.apply_isometry(isometry);
-            }
-        });
+        self.interior
+            .par_iter_mut()
+            .for_each(|p| p.apply_isometry(isometry));
     }
 
     fn apply_translation(&mut self, vector: Vector3<f64>) {
-        if let Some(exterior) = self.exterior.as_mut()
-            && let Some(object) = exterior.object_mut()
-        {
-            object.apply_translation(vector)
+        if let Some(exterior) = self.exterior.as_mut() {
+            exterior.apply_translation(vector);
         }
-
-        self.interior.par_iter_mut().for_each(|p| {
-            if let Some(object) = p.object_mut() {
-                object.apply_translation(vector);
-            }
-        });
+        self.interior
+            .par_iter_mut()
+            .for_each(|p| p.apply_translation(vector));
     }
 
     fn apply_rotation(&mut self, rotation: Rotation3<f64>) {
-        if let Some(exterior) = self.exterior.as_mut()
-            && let Some(object) = exterior.object_mut()
-        {
-            object.apply_rotation(rotation)
+        if let Some(exterior) = self.exterior.as_mut() {
+            exterior.apply_rotation(rotation);
         }
-
-        self.interior.par_iter_mut().for_each(|p| {
-            if let Some(object) = p.object_mut() {
-                object.apply_rotation(rotation);
-            }
-        });
+        self.interior
+            .par_iter_mut()
+            .for_each(|p| p.apply_rotation(rotation));
     }
 
     fn apply_scale(&mut self, scale: Scale3<f64>) {
-        if let Some(exterior) = self.exterior.as_mut()
-            && let Some(object) = exterior.object_mut()
-        {
-            object.apply_scale(scale)
+        if let Some(exterior) = self.exterior.as_mut() {
+            exterior.apply_scale(scale);
         }
-
-        self.interior.par_iter_mut().for_each(|p| {
-            if let Some(object) = p.object_mut() {
-                object.apply_scale(scale);
-            }
-        });
+        self.interior
+            .par_iter_mut()
+            .for_each(|p| p.apply_scale(scale));
     }
 }
 
 impl ComputeEnvelope for Solid {
     /// Returns the union of the bounding boxes of all surface members.
     fn compute_envelope(&self) -> Option<Envelope> {
-        if let Some(exterior) = &self.exterior
-            && let Some(object) = exterior.object()
-        {
-            object.compute_envelope()
-        } else {
-            None
-        }
+        self.exterior.as_ref()?.compute_envelope()
     }
 }
 
@@ -208,16 +164,10 @@ impl IterGeometries for Solid {
                 .chain(
                     self.exterior
                         .as_ref()
-                        .and_then(|x| x.object())
                         .into_iter()
                         .flat_map(|x| x.iter_geometries()),
                 )
-                .chain(
-                    self.interior
-                        .iter()
-                        .filter_map(|x| x.object())
-                        .flat_map(|x| x.iter_geometries()),
-                ),
+                .chain(self.interior.iter().flat_map(|x| x.iter_geometries())),
         )
     }
 }
@@ -229,27 +179,14 @@ impl Triangulate for Solid {
     /// # Errors
     ///
     /// Returns [`Error::MissingExteriorShell`] if the solid has no exterior shell.
-    /// Returns [`Error::UnresolvedShellReference`] if any shell property carries only
-    /// an xlink:href that has not been resolved into an inline object.
     /// Propagates any error from [`Shell::triangulate`].
     fn triangulate(&self) -> Result<Triangulation, Error> {
-        let exterior_shell_property = self.exterior.as_ref().ok_or(Error::MissingExteriorShell)?;
-        let exterior_shell =
-            exterior_shell_property
-                .object()
-                .ok_or_else(|| Error::UnresolvedShellReference {
-                    href: exterior_shell_property.href().map(|h| h.to_string()),
-                })?;
+        let exterior_shell = self.exterior.as_ref().ok_or(Error::MissingExteriorShell)?;
 
         let (exterior_surface, mut skipped) = exterior_shell.triangulate()?.into_parts();
         let mut surfaces = vec![exterior_surface];
 
-        for shell_property in &self.interior {
-            let shell = shell_property
-                .object()
-                .ok_or_else(|| Error::UnresolvedShellReference {
-                    href: shell_property.href().map(|h| h.to_string()),
-                })?;
+        for shell in &self.interior {
             let (surface, nested_skipped) = shell.triangulate()?.into_parts();
             surfaces.push(surface);
             skipped.extend(nested_skipped);
@@ -264,7 +201,6 @@ impl Triangulate for Solid {
 mod tests {
     use super::*;
     use crate::model::geometry::Envelope;
-    use crate::model::geometry::primitives::ShellProperty;
 
     #[test]
     fn volume_3d_unit_cube() {
@@ -300,14 +236,14 @@ mod tests {
         .to_solid()
         .unwrap();
 
-        let interior_shell = solid.exterior().unwrap().object().cloned().unwrap();
-        solid.push_interior(ShellProperty::from_object(interior_shell));
+        let interior_shell = solid.exterior().cloned().unwrap();
+        solid.push_interior(interior_shell);
 
-        let before = solid.interior()[0].object().unwrap().points()[0].x();
+        let before = solid.interior()[0].points()[0].x();
 
         solid.apply_translation(Vector3::new(5.0, 0.0, 0.0));
 
-        let after = solid.interior()[0].object().unwrap().points()[0].x();
+        let after = solid.interior()[0].points()[0].x();
 
         assert!((after - before - 5.0).abs() < 1e-10);
     }
@@ -330,17 +266,5 @@ mod tests {
     fn volume_3d_missing_exterior_shell() {
         let solid = Solid::new(None).unwrap();
         assert_eq!(solid.volume_3d(), Err(Error::MissingExteriorShell));
-    }
-
-    #[test]
-    fn volume_3d_unresolved_shell_reference() {
-        let solid =
-            Solid::new(Some(ShellProperty::from_href("urn:example:shell-1".into()))).unwrap();
-        assert_eq!(
-            solid.volume_3d(),
-            Err(Error::UnresolvedShellReference {
-                href: Some("urn:example:shell-1".to_string())
-            })
-        );
     }
 }

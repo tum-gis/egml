@@ -1,28 +1,40 @@
 use crate::Error;
 use crate::codec::geometry::primitives::abstract_solid::{
-    deserialize_abstract_solid, serialize_abstract_solid,
+    deserialize_abstract_solid, serialize_abstract_solid, serialize_abstract_solid_attributes,
 };
 use crate::codec::geometry::primitives::{deserialize_shell_property, serialize_shell_property};
 use crate::util::{
-    Formatting, GmlElement, XmlNode, XmlNodeContent, collect_child, collect_children,
-    extract_xml_element_spans,
+    DeserializationConfig, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter,
+    collect_child, collect_children,
 };
-use egml_core::model::geometry::primitives::{AsAbstractSolid, ShellProperty, Solid};
+use egml_core::model::geometry::primitives::{AsAbstractSolid, Shell, Solid};
+use std::io::Write;
 
-pub fn deserialize_solid(xml_document: &[u8]) -> Result<Solid, Error> {
-    let spans = extract_xml_element_spans(xml_document)?;
-    let abstract_solid = deserialize_abstract_solid(xml_document, &spans)?;
+pub fn deserialize_solid(
+    xml_document: &[u8],
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<Solid, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
+
+    let abstract_solid = deserialize_abstract_solid(xml_document, index, config)?;
 
     let exterior = collect_child(
         xml_document,
-        &spans,
+        index,
         GmlElement::ExteriorProperty,
+        config,
         deserialize_shell_property,
     )?;
-    let interior: Vec<ShellProperty> = collect_children(
+    let interior: Vec<Shell> = collect_children(
         xml_document,
-        &spans,
+        index,
         GmlElement::InteriorProperty,
+        config,
         deserialize_shell_property,
     )?;
 
@@ -31,41 +43,68 @@ pub fn deserialize_solid(xml_document: &[u8]) -> Result<Solid, Error> {
     Ok(solid)
 }
 
-pub fn serialize_solid(solid: &Solid, formatting: Formatting) -> Result<XmlNode, Error> {
-    let mut xml_node_parts = serialize_abstract_solid(solid.abstract_solid(), formatting)?;
+pub fn serialize_solid<W: Write>(
+    solid: &Solid,
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    let attributes = serialize_solid_attributes(solid);
+
+    xml_fragment_writer.write_start_event_with_attributes(
+        GmlNamespace::Gml,
+        GmlElement::Solid,
+        attributes,
+    )?;
+
+    serialize_abstract_solid(solid.abstract_solid(), xml_fragment_writer)?;
 
     if let Some(object) = &solid.exterior() {
-        xml_node_parts
-            .content
-            .push(XmlNodeContent::Child(serialize_shell_property(
-                object,
-                formatting,
-                GmlElement::ExteriorProperty.into(),
-            )?));
+        serialize_shell_property(
+            object,
+            xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::ExteriorProperty,
+        )?;
     }
     for prop in solid.interior() {
-        xml_node_parts
-            .content
-            .push(XmlNodeContent::Child(serialize_shell_property(
-                prop,
-                formatting,
-                GmlElement::InteriorProperty.into(),
-            )?));
+        serialize_shell_property(
+            prop,
+            xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::InteriorProperty,
+        )?;
     }
 
-    Ok(XmlNode::new(GmlElement::Solid.into(), xml_node_parts))
+    xml_fragment_writer.write_end_event(GmlNamespace::Gml, GmlElement::Solid)?;
+
+    Ok(())
+}
+
+pub fn serialize_solid_attributes(solid: &Solid) -> Vec<(String, String)> {
+    serialize_abstract_solid_attributes(solid.abstract_solid())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::geometry::primitives::solid::{deserialize_solid, serialize_solid};
-    use crate::util::Formatting;
+    // Test-only convenience: builds the index the real function now
+    // requires, so existing single-argument call sites below don't all
+    // need to construct one by hand.
+    fn deserialize(xml_document: &[u8]) -> Result<super::Solid, crate::Error> {
+        let index = crate::util::XmlDocumentIndex::from_scan(xml_document, None)?;
+        super::deserialize_solid(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+    }
+
+    use crate::codec::geometry::primitives::solid::serialize_solid;
+    use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::base::HasAssociationAttributes;
     use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::{
-        AbstractRingKind, AbstractRingProperty, AbstractSurfaceKind, AbstractSurfaceProperty,
-        LinearRing, Polygon, Shell, ShellProperty, Solid,
+        AbstractRingKind, AbstractSurfaceKind, AbstractSurfaceProperty, LinearRing, Polygon, Shell,
+        Solid,
     };
 
     fn make_solid() -> Solid {
@@ -75,11 +114,11 @@ mod tests {
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
         let ring_kind = AbstractRingKind::LinearRing(LinearRing::new(points).unwrap());
-        let polygon = Polygon::new(Some(AbstractRingProperty::from_object(ring_kind)), []).unwrap();
+        let polygon = Polygon::new(Some(ring_kind), []).unwrap();
         let surface_prop =
             AbstractSurfaceProperty::from_object(AbstractSurfaceKind::Polygon(polygon));
         let shell = Shell::new([surface_prop]).expect("should create shell");
-        let exterior = Some(ShellProperty::from_object(shell));
+        let exterior = Some(shell);
 
         Solid::new(exterior).unwrap()
     }
@@ -112,8 +151,8 @@ mod tests {
           </gml:exterior>
         </gml:Solid>";
 
-        let solid_geometry = deserialize_solid(xml_document).unwrap();
-        let exterior_shell = solid_geometry.exterior().unwrap().object().unwrap();
+        let solid_geometry = deserialize(xml_document).unwrap();
+        let exterior_shell = solid_geometry.exterior().unwrap();
 
         assert_eq!(exterior_shell.members().len(), 2);
     }
@@ -131,16 +170,10 @@ mod tests {
           </gml:exterior>
         </gml:Solid>";
 
-        let solid_geometry =
-            deserialize_solid(xml_document).expect("should deserialize solid geometry");
+        let solid_geometry = deserialize(xml_document).expect("should deserialize solid geometry");
         assert!(solid_geometry.exterior().is_some());
 
-        let shell = solid_geometry
-            .exterior()
-            .as_ref()
-            .unwrap()
-            .object()
-            .expect("should have exterior");
+        let shell = solid_geometry.exterior().unwrap();
 
         assert_eq!(shell.members().len(), 3);
         assert!(shell.members().iter().all(|x| x.href().is_some()));
@@ -175,8 +208,8 @@ mod tests {
           </gml:exterior>
         </gml:Solid>";
 
-        let solid_geometry = deserialize_solid(xml_document).unwrap();
-        let exterior_shell = solid_geometry.exterior().unwrap().object().unwrap();
+        let solid_geometry = deserialize(xml_document).unwrap();
+        let exterior_shell = solid_geometry.exterior().unwrap();
 
         assert_eq!(exterior_shell.members().len(), 2);
     }
@@ -185,10 +218,9 @@ mod tests {
     fn serialize_solid_writes_gml_tags() {
         let solid = make_solid();
 
-        let xml_node = serialize_solid(&solid, Formatting::Compact).expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_solid(&solid, &mut xml_fragment_writer).expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert!(xml.contains("<gml:Solid"));
         assert!(xml.contains("<gml:exterior"));
@@ -205,10 +237,9 @@ mod tests {
         let mut solid = make_solid();
         solid.set_id(Id::try_from("test-id").unwrap());
 
-        let xml_node = serialize_solid(&solid, Formatting::Compact).expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_solid(&solid, &mut xml_fragment_writer).expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert!(xml.contains("gml:id=\"test-id\""));
     }
@@ -217,19 +248,14 @@ mod tests {
     fn round_trip_solid_preserves_member_count() {
         let solid = make_solid();
 
-        let xml_node = serialize_solid(&solid, Formatting::Compact).expect("should serialize");
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
-        let recovered = deserialize_solid(xml.as_bytes()).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_solid(&solid, &mut xml_fragment_writer).expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
+        let recovered = deserialize(xml.as_bytes()).unwrap();
 
         assert_eq!(
-            solid.exterior().unwrap().object().unwrap().members().len(),
-            recovered
-                .exterior()
-                .unwrap()
-                .object()
-                .unwrap()
-                .members()
-                .len(),
+            solid.exterior().unwrap().members().len(),
+            recovered.exterior().unwrap().members().len(),
         );
     }
 
@@ -250,13 +276,11 @@ mod tests {
           </gml:interior>
         </gml:Solid>";
 
-        let solid = deserialize_solid(xml_document).expect("should deserialize");
+        let solid = deserialize(xml_document).expect("should deserialize");
 
         assert!(solid.exterior().is_some());
         assert_eq!(solid.interior().len(), 1);
-        let interior_shell = solid.interior()[0]
-            .object()
-            .expect("should have interior shell");
+        let interior_shell = &solid.interior()[0];
         assert_eq!(interior_shell.members().len(), 2);
     }
 
@@ -275,15 +299,16 @@ mod tests {
             </gml:Shell></gml:interior>\
             </gml:Solid>";
 
-        let solid = deserialize_solid(xml_document).expect("should deserialize");
-        let xml_node = serialize_solid(&solid, Formatting::Compact).expect("should serialize");
-        let output = xml_node.to_string(Formatting::Compact).unwrap();
-        let recovered = deserialize_solid(output.as_bytes()).expect("should deserialize recovered");
+        let solid = deserialize(xml_document).expect("should deserialize");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_solid(&solid, &mut xml_fragment_writer).expect("should serialize");
+        let output = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
+        let recovered = deserialize(output.as_bytes()).expect("should deserialize recovered");
 
         assert_eq!(solid.interior().len(), recovered.interior().len());
         assert_eq!(
-            solid.interior()[0].object().unwrap().members().len(),
-            recovered.interior()[0].object().unwrap().members().len(),
+            solid.interior()[0].members().len(),
+            recovered.interior()[0].members().len(),
         );
     }
 
@@ -297,21 +322,16 @@ mod tests {
             </gml:Shell></gml:exterior>\
             </gml:Solid>";
 
-        let solid = deserialize_solid(xml_document).expect("should deserialize");
-        let xml_node = serialize_solid(&solid, Formatting::Compact).expect("should serialize");
-        let output = xml_node.to_string(Formatting::Compact).unwrap();
+        let solid = deserialize(xml_document).expect("should deserialize");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_solid(&solid, &mut xml_fragment_writer).expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
-        let recovered = deserialize_solid(output.as_bytes()).expect("should deserialize recovered");
+        let recovered = deserialize(xml.as_bytes()).expect("should deserialize recovered");
 
         assert_eq!(
-            recovered
-                .exterior()
-                .unwrap()
-                .object()
-                .unwrap()
-                .members()
-                .len(),
-            solid.exterior().unwrap().object().unwrap().members().len(),
+            recovered.exterior().unwrap().members().len(),
+            solid.exterior().unwrap().members().len(),
         );
         assert_eq!(recovered.id(), solid.id());
     }

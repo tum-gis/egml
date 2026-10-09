@@ -1,23 +1,36 @@
 use crate::Error;
 use crate::codec::geometry::primitives::{
     deserialize_abstract_surface, deserialize_abstract_surface_property,
-    serialize_abstract_surface, serialize_abstract_surface_property,
+    serialize_abstract_surface, serialize_abstract_surface_attributes,
+    serialize_abstract_surface_property,
 };
 use crate::util::{
-    Formatting, GmlElement, XmlNode, XmlNodeContent, collect_children, extract_xml_element_spans,
+    DeserializationConfig, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter,
+    collect_children,
 };
 use egml_core::model::geometry::aggregates::AggregationType;
 use egml_core::model::geometry::complexes::CompositeSurface;
 use egml_core::model::geometry::primitives::AsAbstractSurface;
+use std::io::Write;
 
-pub fn deserialize_composite_surface(xml_document: &[u8]) -> Result<CompositeSurface, Error> {
-    let spans = extract_xml_element_spans(xml_document)?;
-    let abstract_surface = deserialize_abstract_surface(xml_document, &spans)?;
+pub fn deserialize_composite_surface(
+    xml_document: &[u8],
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<CompositeSurface, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
+
+    let abstract_surface = deserialize_abstract_surface(xml_document, index, config)?;
 
     let surface_members = collect_children(
         xml_document,
-        &spans,
+        index,
         GmlElement::SurfaceMemberProperty,
+        config,
         deserialize_abstract_surface_property,
     )?;
 
@@ -28,38 +41,60 @@ pub fn deserialize_composite_surface(xml_document: &[u8]) -> Result<CompositeSur
     )?)
 }
 
-pub fn serialize_composite_surface(
+pub fn serialize_composite_surface<W: Write>(
     surface: &CompositeSurface,
-    formatting: Formatting,
-) -> Result<XmlNode, Error> {
-    let mut parts = serialize_abstract_surface(surface.abstract_surface(), formatting)?;
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    let attributes = serialize_composite_surface_attributes(surface);
+
+    xml_fragment_writer.write_start_event_with_attributes(
+        GmlNamespace::Gml,
+        GmlElement::CompositeSurface,
+        attributes,
+    )?;
+
+    serialize_abstract_surface(surface.abstract_surface(), xml_fragment_writer)?;
 
     for member in surface.surface_member() {
-        parts
-            .content
-            .push(XmlNodeContent::Child(serialize_abstract_surface_property(
-                member,
-                formatting,
-                GmlElement::SurfaceMemberProperty.into(),
-            )?));
+        serialize_abstract_surface_property(
+            member,
+            xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::SurfaceMemberProperty,
+        )?;
     }
 
-    Ok(XmlNode::new(GmlElement::CompositeSurface.into(), parts))
+    xml_fragment_writer.write_end_event(GmlNamespace::Gml, GmlElement::CompositeSurface)?;
+
+    Ok(())
+}
+
+pub fn serialize_composite_surface_attributes(surface: &CompositeSurface) -> Vec<(String, String)> {
+    serialize_abstract_surface_attributes(surface.abstract_surface())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::geometry::complexes::composite_surface::{
-        deserialize_composite_surface, serialize_composite_surface,
-    };
-    use crate::util::Formatting;
+    // Test-only convenience: builds the index the real function now
+    // requires, so existing single-argument call sites below don't all
+    // need to construct one by hand.
+    fn deserialize(xml_document: &[u8]) -> Result<super::CompositeSurface, crate::Error> {
+        let index = crate::util::XmlDocumentIndex::from_scan(xml_document, None)?;
+        super::deserialize_composite_surface(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+    }
+
+    use crate::codec::geometry::complexes::composite_surface::serialize_composite_surface;
+    use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::aggregates::AggregationType;
     use egml_core::model::geometry::complexes::CompositeSurface;
     use egml_core::model::geometry::primitives::{
-        AbstractRingKind, AbstractRingProperty, AbstractSurfaceKind, AbstractSurfaceProperty,
-        LinearRing, Polygon,
+        AbstractRingKind, AbstractSurfaceKind, AbstractSurfaceProperty, LinearRing, Polygon,
     };
 
     fn make_composite_surface() -> CompositeSurface {
@@ -69,13 +104,7 @@ mod tests {
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ])
         .unwrap();
-        let polygon = Polygon::new(
-            Some(AbstractRingProperty::from_object(
-                AbstractRingKind::LinearRing(ring),
-            )),
-            [],
-        )
-        .unwrap();
+        let polygon = Polygon::new(Some(AbstractRingKind::LinearRing(ring)), []).unwrap();
         let member = AbstractSurfaceProperty::from_object(AbstractSurfaceKind::Polygon(polygon));
         CompositeSurface::new([member], AggregationType::Array).unwrap()
     }
@@ -112,7 +141,7 @@ mod tests {
             </gml:surfaceMember>
         </gml:CompositeSurface>";
 
-        let surface = deserialize_composite_surface(xml_document).expect("should deserialize");
+        let surface = deserialize(xml_document).expect("should deserialize");
 
         assert_eq!(surface.surface_member_count(), 3);
     }
@@ -121,11 +150,10 @@ mod tests {
     fn serialize_composite_surface_writes_gml_tags() {
         let surface = make_composite_surface();
 
-        let xml_node =
-            serialize_composite_surface(&surface, Formatting::Compact).expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_composite_surface(&surface, &mut xml_fragment_writer).expect("should serialize");
+        let xml =
+            String::from_utf8(xml_fragment_writer.into_bytes()).expect("to string should work");
 
         assert!(xml.contains("<gml:CompositeSurface"));
         assert!(xml.contains("<gml:surfaceMember"));
@@ -142,11 +170,10 @@ mod tests {
         let mut surface = make_composite_surface();
         surface.set_id(Id::try_from("test-id").unwrap());
 
-        let xml_node =
-            serialize_composite_surface(&surface, Formatting::Compact).expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_composite_surface(&surface, &mut xml_fragment_writer).expect("should serialize");
+        let xml =
+            String::from_utf8(xml_fragment_writer.into_bytes()).expect("to string should work");
 
         assert!(xml.contains("gml:id=\"test-id\""));
     }
@@ -155,11 +182,12 @@ mod tests {
     fn round_trip_composite_surface_preserves_member_count() {
         let surface = make_composite_surface();
 
-        let xml_node =
-            serialize_composite_surface(&surface, Formatting::Compact).expect("should serialize");
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_composite_surface(&surface, &mut xml_fragment_writer).expect("should serialize");
+        let xml =
+            String::from_utf8(xml_fragment_writer.into_bytes()).expect("to string should work");
 
-        let recovered = deserialize_composite_surface(xml.as_bytes()).expect("should deserialize");
+        let recovered = deserialize(xml.as_bytes()).expect("should deserialize");
 
         assert_eq!(
             recovered.surface_member_count(),
@@ -175,13 +203,13 @@ mod tests {
             </gml:LinearRing></gml:exterior></gml:Polygon></gml:surfaceMember>\
             </gml:CompositeSurface>";
 
-        let surface = deserialize_composite_surface(xml_document).expect("should deserialize");
-        let xml_node =
-            serialize_composite_surface(&surface, Formatting::Compact).expect("should serialize");
-        let output = xml_node.to_string(Formatting::Compact).unwrap();
+        let surface = deserialize(xml_document).expect("should deserialize");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_composite_surface(&surface, &mut xml_fragment_writer).expect("should serialize");
+        let output =
+            String::from_utf8(xml_fragment_writer.into_bytes()).expect("to string should work");
 
-        let recovered =
-            deserialize_composite_surface(output.as_bytes()).expect("should deserialize");
+        let recovered = deserialize(output.as_bytes()).expect("should deserialize");
 
         assert_eq!(
             recovered.surface_member_count(),

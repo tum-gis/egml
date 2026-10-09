@@ -179,8 +179,8 @@ mod tests {
     use crate::model::geometry::DirectPosition;
     use crate::model::geometry::aggregates::{AbstractGeometricAggregateKind, MultiSurface};
     use crate::model::geometry::primitives::{
-        AbstractGeometricPrimitiveKind, AbstractRingKind, AbstractRingProperty,
-        AbstractSurfaceKind, AbstractSurfaceProperty, LinearRing, Point, Polygon,
+        AbstractGeometricPrimitiveKind, AbstractRingKind, AbstractSurfaceKind,
+        AbstractSurfaceProperty, LinearRing, Point, Polygon,
     };
 
     #[test]
@@ -202,7 +202,7 @@ mod tests {
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
         let ring = AbstractRingKind::LinearRing(LinearRing::new(points).unwrap());
-        let polygon = Polygon::new(Some(AbstractRingProperty::from_object(ring)), []).unwrap();
+        let polygon = Polygon::new(Some(ring), []).unwrap();
         let kind = AbstractGeometryKind::AbstractGeometricPrimitiveKind(
             AbstractGeometricPrimitiveKind::AbstractSurfaceKind(AbstractSurfaceKind::Polygon(
                 polygon,
@@ -220,7 +220,7 @@ mod tests {
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
         let ring = AbstractRingKind::LinearRing(LinearRing::new(points).unwrap());
-        let polygon = Polygon::new(Some(AbstractRingProperty::from_object(ring)), []).unwrap();
+        let polygon = Polygon::new(Some(ring), []).unwrap();
         let member = AbstractSurfaceProperty::from_object(AbstractSurfaceKind::Polygon(polygon));
         let multi_surface = MultiSurface::new([member]).unwrap();
         let kind = AbstractGeometryKind::AbstractGeometricAggregateKind(

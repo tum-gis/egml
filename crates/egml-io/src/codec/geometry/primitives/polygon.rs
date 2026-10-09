@@ -1,30 +1,42 @@
 use crate::Error;
 use crate::codec::geometry::primitives::abstract_surface::{
-    deserialize_abstract_surface, serialize_abstract_surface,
+    deserialize_abstract_surface, serialize_abstract_surface, serialize_abstract_surface_attributes,
 };
 use crate::codec::geometry::primitives::{
     deserialize_abstract_ring_property, serialize_abstract_ring_property,
 };
 use crate::util::{
-    Formatting, GmlElement, XmlNode, XmlNodeContent, collect_child, collect_children,
-    extract_xml_element_spans,
+    DeserializationConfig, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter,
+    collect_child, collect_children,
 };
-use egml_core::model::geometry::primitives::{AbstractRingProperty, AsAbstractSurface, Polygon};
+use egml_core::model::geometry::primitives::{AbstractRingKind, AsAbstractSurface, Polygon};
+use std::io::Write;
 
-pub fn deserialize_polygon(xml_document: &[u8]) -> Result<Polygon, Error> {
-    let spans = extract_xml_element_spans(xml_document)?;
-    let abstract_surface = deserialize_abstract_surface(xml_document, &spans)?;
+pub fn deserialize_polygon(
+    xml_document: &[u8],
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<Polygon, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
+
+    let abstract_surface = deserialize_abstract_surface(xml_document, index, config)?;
 
     let exterior = collect_child(
         xml_document,
-        &spans,
+        index,
         GmlElement::ExteriorProperty,
+        config,
         deserialize_abstract_ring_property,
     )?;
-    let interior: Vec<AbstractRingProperty> = collect_children(
+    let interior: Vec<AbstractRingKind> = collect_children(
         xml_document,
-        &spans,
+        index,
         GmlElement::InteriorProperty,
+        config,
         deserialize_abstract_ring_property,
     )?;
 
@@ -32,41 +44,90 @@ pub fn deserialize_polygon(xml_document: &[u8]) -> Result<Polygon, Error> {
     Ok(polygon)
 }
 
-pub fn serialize_polygon(polygon: &Polygon, formatting: Formatting) -> Result<XmlNode, Error> {
-    let mut xml_node_parts = serialize_abstract_surface(polygon.abstract_surface(), formatting)?;
+pub fn serialize_polygon<W: Write>(
+    polygon: &Polygon,
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    let attributes = serialize_polygon_attributes(polygon);
+
+    xml_fragment_writer.write_start_event_with_attributes(
+        GmlNamespace::Gml,
+        GmlElement::Polygon,
+        attributes,
+    )?;
+
+    serialize_abstract_surface(polygon.abstract_surface(), xml_fragment_writer)?;
 
     if let Some(object) = &polygon.exterior() {
-        xml_node_parts
-            .content
-            .push(XmlNodeContent::Child(serialize_abstract_ring_property(
-                object,
-                formatting,
-                GmlElement::ExteriorProperty.into(),
-            )?));
+        serialize_abstract_ring_property(
+            object,
+            xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::ExteriorProperty,
+        )?;
     }
     for prop in polygon.interior() {
-        xml_node_parts
-            .content
-            .push(XmlNodeContent::Child(serialize_abstract_ring_property(
-                prop,
-                formatting,
-                GmlElement::InteriorProperty.into(),
-            )?));
+        serialize_abstract_ring_property(
+            prop,
+            xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::InteriorProperty,
+        )?;
     }
 
-    Ok(XmlNode::new(GmlElement::Polygon.into(), xml_node_parts))
+    xml_fragment_writer.write_end_event(GmlNamespace::Gml, GmlElement::Polygon)?;
+
+    Ok(())
+}
+
+pub fn serialize_polygon_attributes(polygon: &Polygon) -> Vec<(String, String)> {
+    serialize_abstract_surface_attributes(polygon.abstract_surface())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::geometry::primitives::deserialize_polygon;
+    // Test-only convenience: builds the index the real function now
+    // requires, so existing single-argument call sites below don't all
+    // need to construct one by hand.
+    fn deserialize(xml_document: &[u8]) -> Result<super::Polygon, crate::Error> {
+        let index = crate::util::XmlDocumentIndex::from_scan(xml_document, None)?;
+        super::deserialize_polygon(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+    }
+
     use crate::codec::geometry::primitives::polygon::serialize_polygon;
-    use crate::util::Formatting;
+    use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::common::Triangulate;
     use egml_core::model::geometry::DirectPosition;
-    use egml_core::model::geometry::primitives::{
-        AbstractRingKind, AbstractRingProperty, LinearRing, Polygon,
-    };
+    use egml_core::model::geometry::primitives::{AbstractRingKind, LinearRing, Polygon};
+
+    #[test]
+    fn deserialize_polygon_rescans_a_truncated_index() {
+        let outer_xml = b"<gml:wrapper><gml:Polygon><gml:exterior><gml:LinearRing>\
+            <gml:posList srsDimension=\"3\">0 0 0 1 0 0 0 1 0 0 0 0</gml:posList>\
+            </gml:LinearRing></gml:exterior></gml:Polygon></gml:wrapper>";
+
+        // A depth-1 scan records the Polygon element itself but never looks
+        // inside it, so the node it hands back comes back truncated.
+        let index =
+            crate::util::XmlDocumentIndex::<crate::util::GmlElement>::from_scan(outer_xml, Some(1))
+                .unwrap();
+        let polygon_node = index.first(crate::util::GmlElement::Polygon).unwrap();
+        assert!(polygon_node.is_truncated());
+
+        let polygon_slice = &outer_xml[polygon_node.range()];
+        let polygon = super::deserialize_polygon(
+            polygon_slice,
+            polygon_node,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .expect("should rescan internally instead of trusting the truncated index");
+
+        assert!(polygon.exterior().is_some());
+    }
 
     /// Real CityGML LOD2 polygon (`DEBY_LOD2_4906980_BP...K8MLz6HFMDUSAU80ScjF`): a
     /// near-circular annulus made of ~58 exterior and ~58 interior points. Regression
@@ -87,7 +148,7 @@ mod tests {
           </gml:interior>
         </gml:Polygon>"#;
 
-        let polygon = deserialize_polygon(xml).expect("should parse");
+        let polygon = deserialize(xml).expect("should parse");
         let result = polygon.triangulate();
         assert!(
             result.is_ok(),
@@ -109,7 +170,7 @@ mod tests {
           </gml:exterior>
         </gml:Polygon>"#;
 
-        let polygon = deserialize_polygon(xml).expect("should parse");
+        let polygon = deserialize(xml).expect("should parse");
         let result = polygon.triangulate();
         assert!(
             result.is_ok(),
@@ -135,7 +196,7 @@ mod tests {
           </gml:exterior>
         </gml:Polygon>"#;
 
-        let polygon = deserialize_polygon(xml).expect("should parse");
+        let polygon = deserialize(xml).expect("should parse");
         let result = polygon.triangulate();
         assert!(
             result.is_err(),
@@ -145,7 +206,7 @@ mod tests {
 
     fn make_polygon(points: Vec<DirectPosition>) -> Polygon {
         let ring_kind = AbstractRingKind::LinearRing(LinearRing::new(points).unwrap());
-        Polygon::new(Some(AbstractRingProperty::from_object(ring_kind)), vec![]).unwrap()
+        Polygon::new(Some(ring_kind), vec![]).unwrap()
     }
 
     fn make_square() -> Polygon {
@@ -177,7 +238,7 @@ mod tests {
                   </gml:interior>
                 </gml:Polygon>";
 
-        let polygon = deserialize_polygon(xml_document.as_bytes()).expect("should deserialize");
+        let polygon = deserialize(xml_document.as_bytes()).expect("should deserialize");
 
         assert_eq!(polygon.interior().len(), 2)
     }
@@ -185,10 +246,9 @@ mod tests {
     #[test]
     fn serialize_polygon_writes_gml_tags() {
         let polygon = make_square();
-        let xml_node = serialize_polygon(&polygon, Formatting::Compact).unwrap();
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_polygon(&polygon, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert!(xml.contains("<gml:Polygon"));
         assert!(xml.contains("<gml:exterior"));
@@ -200,19 +260,14 @@ mod tests {
     #[test]
     fn round_trip_polygon_preserves_points() {
         let polygon = make_square();
-        let xml_node = serialize_polygon(&polygon, Formatting::Compact).unwrap();
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_polygon(&polygon, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
-        let recovered: Polygon = deserialize_polygon(xml.as_ref()).unwrap();
+        let recovered: Polygon = deserialize(xml.as_ref()).unwrap();
 
-        let orig = polygon.exterior().unwrap().object().expect("ring missing");
-        let recov = recovered
-            .exterior()
-            .unwrap()
-            .object()
-            .expect("ring missing");
+        let orig = polygon.exterior().unwrap();
+        let recov = recovered.exterior().unwrap();
         assert_eq!(orig.points().len(), recov.points().len());
     }
 
@@ -222,11 +277,11 @@ mod tests {
             <gml:exterior><gml:LinearRing><gml:posList srsDimension=\"3\">0 0 0 1 0 0 1 1 0 0 1 0 0 0 0</gml:posList></gml:LinearRing></gml:exterior>\
             </gml:Polygon>";
 
-        let polygon = deserialize_polygon(input_xml.as_bytes()).expect("should deserialize");
-        let xml_node = serialize_polygon(&polygon, Formatting::Compact).unwrap();
-        let output_xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
+        let polygon = deserialize(input_xml.as_bytes()).expect("should deserialize");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_polygon(&polygon, &mut xml_fragment_writer).unwrap();
+        let output_xml =
+            String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert_eq!(input_xml, output_xml);
     }
@@ -247,19 +302,14 @@ mod tests {
         ];
         let exterior = AbstractRingKind::LinearRing(LinearRing::new(exterior_pts).unwrap());
         let interior = AbstractRingKind::LinearRing(LinearRing::new(interior_pts).unwrap());
-        let polygon = Polygon::new(
-            Some(AbstractRingProperty::from_object(exterior)),
-            vec![AbstractRingProperty::from_object(interior)],
-        )
-        .unwrap();
+        let polygon = Polygon::new(Some(exterior), vec![interior]).unwrap();
 
-        let xml_node = serialize_polygon(&polygon, Formatting::Compact).unwrap();
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("should serialize");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_polygon(&polygon, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("should serialize");
 
         assert!(xml.contains("<gml:interior"));
-        let recovered: Polygon = deserialize_polygon(xml.as_ref()).expect("should deserialize");
+        let recovered: Polygon = deserialize(xml.as_ref()).expect("should deserialize");
         assert_eq!(recovered.interior().len(), 1);
     }
 }

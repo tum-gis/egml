@@ -251,8 +251,8 @@ mod tests {
     use crate::model::geometry::AbstractGeometryKind;
     use crate::model::geometry::DirectPosition;
     use crate::model::geometry::primitives::{
-        AbstractGeometricPrimitiveKind, AbstractRingKind, AbstractRingProperty,
-        AbstractSurfaceKind, AsSurface, LinearRing, Polygon,
+        AbstractGeometricPrimitiveKind, AbstractRingKind, AbstractSurfaceKind, AsSurface,
+        LinearRing, Polygon,
     };
 
     fn unit_square_polygon_kind(z: f64) -> AbstractGeometryKind {
@@ -263,13 +263,7 @@ mod tests {
             DirectPosition::new(0.0, 1.0, z).unwrap(),
         ])
         .unwrap();
-        let polygon = Polygon::new(
-            Some(AbstractRingProperty::from_object(
-                AbstractRingKind::LinearRing(ring),
-            )),
-            vec![],
-        )
-        .unwrap();
+        let polygon = Polygon::new(Some(AbstractRingKind::LinearRing(ring)), vec![]).unwrap();
         AbstractGeometryKind::AbstractGeometricPrimitiveKind(
             AbstractGeometricPrimitiveKind::AbstractSurfaceKind(AbstractSurfaceKind::Polygon(
                 polygon,
@@ -287,7 +281,7 @@ mod tests {
 
         let triangulated = multi_geometry.triangulate().unwrap();
 
-        assert_eq!(triangulated.surface().patches().objects_len(), 4);
+        assert_eq!(triangulated.surface().patches_len(), 4);
     }
 
     #[test]
@@ -300,7 +294,7 @@ mod tests {
 
         let triangulated = multi_geometry.triangulate().unwrap();
 
-        assert_eq!(triangulated.surface().patches().objects_len(), 4);
+        assert_eq!(triangulated.surface().patches_len(), 4);
     }
 
     #[test]
@@ -314,6 +308,6 @@ mod tests {
 
         let triangulated = multi_geometry.triangulate().unwrap();
 
-        assert_eq!(triangulated.surface().patches().objects_len(), 4);
+        assert_eq!(triangulated.surface().patches_len(), 4);
     }
 }

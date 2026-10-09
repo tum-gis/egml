@@ -1,79 +1,58 @@
 use crate::Error;
-use crate::codec::base::{
-    GmlAssociationAttributes, GmlOwnershipAttributes, serialize_association_attributes,
-    serialize_ownership_attributes,
-};
 use crate::codec::geometry::primitives::{
-    deserialize_abstract_surface_patch_kind, serialize_abstract_surface_patch_kind,
+    deserialize_abstract_surface_patch_kind_for, serialize_abstract_surface_patch_kind,
 };
-use crate::util::{Formatting, GmlElement, XmlElementSpans, XmlNode, XmlNodeContent, XmlNodeParts};
-use egml_core::model::base::{HasAssociationAttributes, HasOwnershipAttributes};
-use egml_core::model::geometry::primitives::AbstractSurfacePatchArrayProperty;
+use crate::util::{
+    DeserializationConfig, GmlElement, XmlDocumentIndex, XmlElement, XmlFragmentWriter,
+    XmlNamespace,
+};
 use egml_core::model::geometry::primitives::AbstractSurfacePatchKind;
-use quick_xml::de;
-use serde::{Deserialize, Serialize};
+use std::io::Write;
 
+/// Deserializes a `gml:SurfacePatchArrayPropertyType` element (`gml:patches`)
+/// into its patches, in document order.
+///
+/// The property type carries no attributes.
 pub fn deserialize_abstract_surface_patch_array_property(
     xml_document: &[u8],
-    spans: &XmlElementSpans<GmlElement>,
-) -> Result<Option<AbstractSurfacePatchArrayProperty>, Error> {
-    let parsed: GmlAbstractSurfacePatchArrayProperty = de::from_reader(xml_document)?;
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<Vec<AbstractSurfacePatchKind>, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
 
-    let mut all_spans: Vec<(GmlElement, std::ops::Range<usize>)> = spans
-        .spans()
+    let mut all_children: Vec<(GmlElement, &XmlDocumentIndex<GmlElement>)> = index
+        .children()
         .iter()
-        .flat_map(|(elem, ranges)| ranges.iter().map(|r| (*elem, r.clone())))
+        .flat_map(|(elem, nodes)| nodes.iter().map(move |node| (*elem, node)))
         .collect();
-    all_spans.sort_by_key(|(_, r)| r.start);
+    all_children.sort_by_key(|(_, node)| node.range().start);
 
-    let patches: Vec<AbstractSurfacePatchKind> = all_spans
+    all_children
         .iter()
-        .filter_map(|(elem, span)| {
-            let slice = &xml_document[span.start..span.end];
-            let parent_spans = XmlElementSpans::single(*elem, slice.len());
-            deserialize_abstract_surface_patch_kind(slice, &parent_spans).transpose()
+        .filter_map(|(elem, node)| {
+            let slice = &xml_document[node.range()];
+            deserialize_abstract_surface_patch_kind_for(*elem, slice, node, config).transpose()
         })
-        .collect::<Result<_, _>>()?;
-
-    if patches.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(AbstractSurfacePatchArrayProperty::new(
-        patches,
-        parsed.association.try_into()?,
-        parsed.ownership.into(),
-    )))
+        .collect()
 }
 
-pub fn serialize_abstract_surface_patch_array_property(
-    abstract_surface_patch_array_property: &AbstractSurfacePatchArrayProperty,
-    formatting: Formatting,
-    target_xml_element: &'static str,
-) -> Result<XmlNode, Error> {
-    let mut parts = XmlNodeParts::empty();
-
-    parts.attributes.extend(serialize_association_attributes(
-        abstract_surface_patch_array_property.association(),
-    ));
-    parts.attributes.extend(serialize_ownership_attributes(
-        abstract_surface_patch_array_property.ownership(),
-    ));
-
-    for patch in abstract_surface_patch_array_property.objects() {
-        parts.content.push(XmlNodeContent::Child(
-            serialize_abstract_surface_patch_kind(patch, formatting)?,
-        ));
+/// Serializes `patches` wrapped in a `gml:SurfacePatchArrayPropertyType` element.
+pub fn serialize_abstract_surface_patch_array_property<N: XmlNamespace, E: XmlElement, W: Write>(
+    patches: &[AbstractSurfacePatchKind],
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+    target_xml_namespace: N,
+    target_xml_element: E,
+) -> Result<(), Error> {
+    xml_fragment_writer.write_start_event(target_xml_namespace, target_xml_element)?;
+    for patch in patches {
+        serialize_abstract_surface_patch_kind(patch, xml_fragment_writer)?;
     }
-
-    Ok(XmlNode::new(target_xml_element, parts))
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub struct GmlAbstractSurfacePatchArrayProperty {
-    #[serde(flatten)]
-    pub association: GmlAssociationAttributes,
-    #[serde(flatten)]
-    pub ownership: GmlOwnershipAttributes,
+    xml_fragment_writer.write_end_event(target_xml_namespace, target_xml_element)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -82,10 +61,7 @@ mod tests {
         deserialize_abstract_surface_patch_array_property,
         serialize_abstract_surface_patch_array_property,
     };
-    use crate::util::{Formatting, GmlElement, extract_xml_element_spans};
-    use egml_core::model::base::{HasAssociationAttributes, HasOwnershipAttributes};
-    use egml_core::model::geometry::primitives::AbstractSurfacePatchArrayProperty;
-    use egml_core::model::xlink::{ActuateType, HRef, ShowType};
+    use crate::util::{Formatting, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter};
 
     #[test]
     fn deserialize_surface_patch_array_property_with_polygon_patches() {
@@ -106,13 +82,16 @@ mod tests {
                 </gml:PolygonPatch>
             </gml:patches>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("extracting spans should work");
-        let surface_patch_array_property: AbstractSurfacePatchArrayProperty =
-            deserialize_abstract_surface_patch_array_property(xml_document, &spans)
-                .expect("should deserialize")
-                .expect("should be some");
+        let index =
+            XmlDocumentIndex::from_scan(xml_document, None).expect("extracting spans should work");
+        let patches = deserialize_abstract_surface_patch_array_property(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .expect("should deserialize");
 
-        assert_eq!(surface_patch_array_property.objects().len(), 2);
+        assert_eq!(patches.len(), 2);
     }
 
     #[test]
@@ -141,13 +120,16 @@ mod tests {
     </gml:Triangle>
 </gml:patches>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("extracting spans should work");
-        let surface_patch_array_property: AbstractSurfacePatchArrayProperty =
-            deserialize_abstract_surface_patch_array_property(xml_document, &spans)
-                .expect("should deserialize")
-                .expect("should be some");
+        let index =
+            XmlDocumentIndex::from_scan(xml_document, None).expect("extracting spans should work");
+        let patches = deserialize_abstract_surface_patch_array_property(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .expect("should deserialize");
 
-        assert_eq!(surface_patch_array_property.objects().len(), 3);
+        assert_eq!(patches.len(), 3);
     }
 
     #[test]
@@ -157,20 +139,24 @@ mod tests {
             <gml:Triangle><gml:exterior><gml:LinearRing><gml:posList srsDimension=\"3\">0 0 0 1 0 0 0 1 0 0 0 0</gml:posList></gml:LinearRing></gml:exterior></gml:Triangle>\
             </gml:patches>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("extracting spans should work");
-        let property = deserialize_abstract_surface_patch_array_property(xml_document, &spans)
-            .unwrap()
-            .unwrap();
+        let index =
+            XmlDocumentIndex::from_scan(xml_document, None).expect("extracting spans should work");
+        let property = deserialize_abstract_surface_patch_array_property(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap();
 
-        let xml_node = serialize_abstract_surface_patch_array_property(
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_surface_patch_array_property(
             &property,
-            Formatting::Compact,
-            GmlElement::PatchesProperty.into(),
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::PatchesProperty,
         )
         .expect("serialize should work");
-        let output = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let output = String::from_utf8(xml_fragment_writer.into_bytes()).expect("valid UTF-8");
 
         assert!(output.contains("<gml:patches"));
         assert!(output.contains("<gml:Triangle"));
@@ -182,62 +168,30 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_with_full_association_and_ownership_attributes() {
-        let xml_document = b"<gml:patches xlink:href=\"#some-id\" xlink:title=\"Some Title\" \
-            xlink:role=\"http://example.com/role\" xlink:arcrole=\"http://example.com/arcrole\" \
-            xlink:show=\"new\" xlink:actuate=\"onLoad\" gml:owns=\"true\">\
-            <gml:Triangle><gml:exterior><gml:LinearRing><gml:posList srsDimension=\"3\">1 0 0 0 1 0 0 0 1 1 0 0</gml:posList></gml:LinearRing></gml:exterior></gml:Triangle>\
+    fn deserialize_ignores_xlink_and_ownership_attributes() {
+        // gml:SurfacePatchArrayPropertyType declares neither attribute group; tolerate them in input.
+        let xml_document = b"<gml:patches xlink:href=\"#some-id\" gml:owns=\"true\">\
+            <gml:Triangle><gml:exterior><gml:LinearRing><gml:posList srsDimension=\"3\">0 0 0 1 0 0 0 1 0 0 0 0</gml:posList></gml:LinearRing></gml:exterior></gml:Triangle>\
             </gml:patches>";
 
-        let spans = extract_xml_element_spans(xml_document).unwrap();
-        let property = deserialize_abstract_surface_patch_array_property(xml_document, &spans)
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(property.href(), Some(&HRef::from_local("some-id")));
-        assert_eq!(property.title().as_deref(), Some("Some Title"));
-        assert_eq!(property.role().as_deref(), Some("http://example.com/role"));
-        assert_eq!(
-            property.arcrole().as_deref(),
-            Some("http://example.com/arcrole")
-        );
-        assert_eq!(property.show(), Some(&ShowType::New));
-        assert_eq!(property.actuate(), Some(&ActuateType::OnLoad));
-        assert!(property.owns());
-    }
-
-    #[test]
-    fn round_trip_preserves_full_association_and_ownership_attributes() {
-        let xml_document = b"<gml:patches xlink:href=\"#some-id\" xlink:title=\"Some Title\" \
-            xlink:role=\"http://example.com/role\" xlink:arcrole=\"http://example.com/arcrole\" \
-            xlink:show=\"new\" xlink:actuate=\"onLoad\" gml:owns=\"true\">\
-            <gml:Triangle><gml:exterior><gml:LinearRing><gml:posList srsDimension=\"3\">1 0 0 0 1 0 0 0 1 1 0 0</gml:posList></gml:LinearRing></gml:exterior></gml:Triangle>\
-            </gml:patches>";
-
-        let spans = extract_xml_element_spans(xml_document).unwrap();
-        let property = deserialize_abstract_surface_patch_array_property(xml_document, &spans)
-            .unwrap()
-            .unwrap();
-
-        let xml_node = serialize_abstract_surface_patch_array_property(
-            &property,
-            Formatting::Compact,
-            GmlElement::PatchesProperty.into(),
+        let index = XmlDocumentIndex::from_scan(xml_document, None).unwrap();
+        let patches = deserialize_abstract_surface_patch_array_property(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
         )
         .unwrap();
-        let output = xml_node.to_string(Formatting::Compact).unwrap();
+        assert_eq!(patches.len(), 1);
 
-        let spans2 = extract_xml_element_spans(output.as_bytes()).unwrap();
-        let recovered =
-            deserialize_abstract_surface_patch_array_property(output.as_bytes(), &spans2)
-                .unwrap()
-                .unwrap();
-
-        assert_eq!(
-            recovered.association(),
-            property.association(),
-            "association attributes did not survive the round trip; output was: {output}"
-        );
-        assert_eq!(recovered.ownership(), property.ownership());
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_surface_patch_array_property(
+            &patches,
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::PatchesProperty,
+        )
+        .unwrap();
+        let output = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
+        assert!(output.starts_with("<gml:patches><gml:Triangle"));
     }
 }

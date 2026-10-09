@@ -1,71 +1,63 @@
 use crate::Error;
-use crate::codec::base::{
-    GmlAssociationAttributes, GmlOwnershipAttributes, serialize_association_attributes,
-    serialize_ownership_attributes,
-};
-use crate::codec::geometry::primitives::{deserialize_point, serialize_point};
+use crate::codec::base::{deserialize_ownership_attributes, serialize_ownership_attributes};
+use crate::codec::geometry::primitives::point::deserialize_point;
+use crate::codec::geometry::primitives::serialize_point;
 use crate::util::{
-    Formatting, GmlElement, XmlElementSpans, XmlNode, XmlNodeContent, XmlNodeParts,
-    collect_children_simple,
+    DeserializationConfig, GmlElement, XmlDocumentIndex, XmlElement, XmlFragmentWriter,
+    XmlNamespace, collect_children,
 };
-use egml_core::model::base::{HasAssociationAttributes, HasOwnershipAttributes};
+use egml_core::model::base::HasOwnershipAttributes;
 use egml_core::model::geometry::primitives::PointArrayProperty;
-use quick_xml::de;
-use serde::{Deserialize, Serialize};
+use std::io::Write;
 
 pub fn deserialize_point_array_property(
     xml_document: &[u8],
-    spans: &XmlElementSpans<GmlElement>,
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
 ) -> Result<Option<PointArrayProperty>, Error> {
-    let parsed: GmlPointArrayProperty = de::from_reader(xml_document)?;
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
 
-    let objects =
-        collect_children_simple(xml_document, spans, GmlElement::Point, deserialize_point)?;
+    let ownership = deserialize_ownership_attributes(xml_document)?;
+    let objects = collect_children(
+        xml_document,
+        index,
+        GmlElement::Point,
+        config,
+        deserialize_point,
+    )?;
 
     if objects.is_empty() {
         return Ok(None);
     }
 
-    Ok(Some(PointArrayProperty::new(
-        objects,
-        parsed.association.try_into()?,
-        parsed.ownership.into(),
-    )))
+    Ok(Some(PointArrayProperty::new(objects, ownership)))
 }
 
-pub fn serialize_point_array_property(
+pub fn serialize_point_array_property<N: XmlNamespace, E: XmlElement, W: Write>(
     point_array_property: &PointArrayProperty,
-    formatting: Formatting,
-    target_xml_element: &'static str,
-) -> Result<XmlNode, Error> {
-    let mut xml_node_parts = XmlNodeParts::empty();
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+    target_xml_namespace: N,
+    target_xml_element: E,
+) -> Result<(), Error> {
+    let attributes = serialize_ownership_attributes(point_array_property.ownership());
 
-    xml_node_parts
-        .attributes
-        .extend(serialize_association_attributes(
-            point_array_property.association(),
-        ));
-    xml_node_parts
-        .attributes
-        .extend(serialize_ownership_attributes(
-            point_array_property.ownership(),
-        ));
+    xml_fragment_writer.write_start_event_with_attributes(
+        target_xml_namespace,
+        target_xml_element,
+        attributes,
+    )?;
 
     for point in point_array_property.objects() {
-        xml_node_parts
-            .content
-            .push(XmlNodeContent::Child(serialize_point(point, formatting)?));
+        serialize_point(point, xml_fragment_writer)?;
     }
 
-    Ok(XmlNode::new(target_xml_element, xml_node_parts))
-}
+    xml_fragment_writer.write_end_event(target_xml_namespace, target_xml_element)?;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub struct GmlPointArrayProperty {
-    #[serde(flatten)]
-    pub association: GmlAssociationAttributes,
-    #[serde(flatten)]
-    pub ownership: GmlOwnershipAttributes,
+    Ok(())
 }
 
 #[cfg(test)]
@@ -73,11 +65,10 @@ mod tests {
     use crate::codec::geometry::primitives::point_array_property::{
         deserialize_point_array_property, serialize_point_array_property,
     };
-    use crate::util::{Formatting, GmlElement, extract_xml_element_spans};
-    use egml_core::model::base::{HasAssociationAttributes, HasOwnershipAttributes};
+    use crate::util::{Formatting, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter};
+    use egml_core::model::base::HasOwnershipAttributes;
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::{Point, PointArrayProperty};
-    use egml_core::model::xlink::{ActuateType, HRef, ShowType};
 
     fn make_point_array_property() -> PointArrayProperty {
         PointArrayProperty::from_objects(vec![
@@ -97,10 +88,15 @@ mod tests {
     </gml:Point>
 </gml:pointMembers>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("extracting spans should work");
-        let property = deserialize_point_array_property(xml_document, &spans)
-            .expect("should deserialize")
-            .expect("should be some");
+        let index =
+            XmlDocumentIndex::from_scan(xml_document, None).expect("extracting spans should work");
+        let property = deserialize_point_array_property(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .expect("should deserialize")
+        .expect("should be some");
 
         assert_eq!(property.objects().len(), 2);
         assert_eq!(property.objects()[0].pos().x(), 1.0);
@@ -111,15 +107,15 @@ mod tests {
     fn serialize_point_array_property_writes_gml_tags() {
         let property = make_point_array_property();
 
-        let xml_node = serialize_point_array_property(
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_point_array_property(
             &property,
-            Formatting::Compact,
-            GmlElement::PointMembersProperty.into(),
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::PointMembersProperty,
         )
         .expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).expect("valid UTF-8");
 
         assert!(xml.contains("<gml:pointMembers"));
         assert!(xml.contains("<gml:Point"));
@@ -134,23 +130,34 @@ mod tests {
             <gml:Point><gml:pos srsDimension=\"3\">4 5 6</gml:pos></gml:Point>\
             </gml:pointMembers>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("extracting spans should work");
-        let property = deserialize_point_array_property(xml_document, &spans)
-            .unwrap()
-            .unwrap();
+        let index =
+            XmlDocumentIndex::from_scan(xml_document, None).expect("extracting spans should work");
+        let property = deserialize_point_array_property(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
-        let xml_node = serialize_point_array_property(
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_point_array_property(
             &property,
-            Formatting::Compact,
-            GmlElement::PointMembersProperty.into(),
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::PointMembersProperty,
         )
         .unwrap();
-        let output = xml_node.to_string(Formatting::Compact).unwrap();
+        let output = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
-        let spans2 = extract_xml_element_spans(output.as_bytes()).unwrap();
-        let recovered = deserialize_point_array_property(output.as_bytes(), &spans2)
-            .unwrap()
-            .unwrap();
+        let spans2 = XmlDocumentIndex::from_scan(output.as_bytes(), None).unwrap();
+        let recovered = deserialize_point_array_property(
+            output.as_bytes(),
+            &spans2,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
         assert_eq!(recovered.objects().len(), 2);
         assert_eq!(
@@ -164,61 +171,67 @@ mod tests {
     }
 
     #[test]
-    fn deserialize_with_full_association_and_ownership_attributes() {
+    fn deserialize_keeps_ownership_and_ignores_xlink_attributes() {
+        // gml:ArrayAssociationType declares only gml:OwnershipAttributeGroup.
         let xml_document = b"<gml:pointMembers xlink:href=\"#some-id\" xlink:title=\"Some Title\" \
             xlink:role=\"http://example.com/role\" xlink:arcrole=\"http://example.com/arcrole\" \
             xlink:show=\"new\" xlink:actuate=\"onLoad\" gml:owns=\"true\">\
             <gml:Point><gml:pos srsDimension=\"3\">1 2 3</gml:pos></gml:Point>\
             </gml:pointMembers>";
 
-        let spans = extract_xml_element_spans(xml_document).unwrap();
-        let property = deserialize_point_array_property(xml_document, &spans)
-            .unwrap()
-            .unwrap();
+        let index = XmlDocumentIndex::from_scan(xml_document, None).unwrap();
+        let property = deserialize_point_array_property(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
-        assert_eq!(property.href(), Some(&HRef::from_local("some-id")));
-        assert_eq!(property.title().as_deref(), Some("Some Title"));
-        assert_eq!(property.role().as_deref(), Some("http://example.com/role"));
-        assert_eq!(
-            property.arcrole().as_deref(),
-            Some("http://example.com/arcrole")
-        );
-        assert_eq!(property.show(), Some(&ShowType::New));
-        assert_eq!(property.actuate(), Some(&ActuateType::OnLoad));
+        assert_eq!(property.objects().len(), 1);
         assert!(property.owns());
     }
 
     #[test]
-    fn round_trip_preserves_full_association_and_ownership_attributes() {
+    fn round_trip_keeps_ownership_and_drops_xlink_attributes() {
         let xml_document = b"<gml:pointMembers xlink:href=\"#some-id\" xlink:title=\"Some Title\" \
             xlink:role=\"http://example.com/role\" xlink:arcrole=\"http://example.com/arcrole\" \
             xlink:show=\"new\" xlink:actuate=\"onLoad\" gml:owns=\"true\">\
             <gml:Point><gml:pos srsDimension=\"3\">1 2 3</gml:pos></gml:Point>\
             </gml:pointMembers>";
 
-        let spans = extract_xml_element_spans(xml_document).unwrap();
-        let property = deserialize_point_array_property(xml_document, &spans)
-            .unwrap()
-            .unwrap();
+        let index = XmlDocumentIndex::from_scan(xml_document, None).unwrap();
+        let property = deserialize_point_array_property(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
-        let xml_node = serialize_point_array_property(
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_point_array_property(
             &property,
-            Formatting::Compact,
-            GmlElement::PointMembersProperty.into(),
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::PointMembersProperty,
         )
         .unwrap();
-        let output = xml_node.to_string(Formatting::Compact).unwrap();
+        let output = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
-        let spans2 = extract_xml_element_spans(output.as_bytes()).unwrap();
-        let recovered = deserialize_point_array_property(output.as_bytes(), &spans2)
-            .unwrap()
-            .unwrap();
+        let spans2 = XmlDocumentIndex::from_scan(output.as_bytes(), None).unwrap();
+        let recovered = deserialize_point_array_property(
+            output.as_bytes(),
+            &spans2,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
 
-        assert_eq!(
-            recovered.association(),
-            property.association(),
-            "association attributes did not survive the round trip; output was: {output}"
+        assert!(
+            !output.contains("xlink"),
+            "unexpected xlink attribute in {output}"
         );
-        assert_eq!(recovered.ownership(), property.ownership());
+        assert!(recovered.owns());
     }
 }

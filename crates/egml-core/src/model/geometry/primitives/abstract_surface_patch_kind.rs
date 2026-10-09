@@ -1,9 +1,9 @@
 use crate::Error;
 use crate::model::common::{ApplyTransform, ComputeEnvelope, Triangulate, Triangulation};
-use crate::model::geometry::Envelope;
 use crate::model::geometry::primitives::{
     AbstractSurfacePatch, AsAbstractSurfacePatch, AsAbstractSurfacePatchMut, PolygonPatch, Triangle,
 };
+use crate::model::geometry::{DirectPosition, Envelope};
 use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector3};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -81,6 +81,13 @@ impl AbstractSurfacePatchKind {
         match self {
             AbstractSurfacePatchKind::PolygonPatch(x) => x.area_3d(),
             AbstractSurfacePatchKind::Triangle(x) => Ok(x.area()),
+        }
+    }
+
+    pub fn points(&self) -> Vec<&DirectPosition> {
+        match self {
+            AbstractSurfacePatchKind::PolygonPatch(x) => x.points(),
+            AbstractSurfacePatchKind::Triangle(x) => x.points(),
         }
     }
 }

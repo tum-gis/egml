@@ -1,41 +1,68 @@
 use crate::Error;
-use crate::codec::geometry::primitives::{
-    deserialize_polygon_patch, deserialize_triangle, serialize_polygon_patch, serialize_triangle,
-};
-use crate::util::{Formatting, GmlElement, XmlElementSpans, XmlNode};
+use crate::codec::geometry::primitives::polygon_patch::deserialize_polygon_patch;
+use crate::codec::geometry::primitives::triangle::deserialize_triangle;
+use crate::codec::geometry::primitives::{serialize_polygon_patch, serialize_triangle};
+use crate::util::{DeserializationConfig, GmlElement, XmlDocumentIndex, XmlFragmentWriter};
 use egml_core::model::geometry::primitives::AbstractSurfacePatchKind;
+use std::io::Write;
 
 pub fn deserialize_abstract_surface_patch_kind(
     xml_document: &[u8],
-    spans: &XmlElementSpans<GmlElement>,
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
 ) -> Result<Option<AbstractSurfacePatchKind>, Error> {
-    if let Some(span) = spans.first(GmlElement::PolygonPatch) {
-        let polygon_patch = deserialize_polygon_patch(&xml_document[span.start..span.end])?;
+    if let Some(node) = index.first(GmlElement::PolygonPatch) {
+        let polygon_patch = deserialize_polygon_patch(&xml_document[node.range()], node, config)?;
         return Ok(Some(polygon_patch.into()));
     }
 
-    if let Some(span) = spans.first(GmlElement::Triangle) {
-        let triangle = deserialize_triangle(&xml_document[span.start..span.end])?;
+    if let Some(node) = index.first(GmlElement::Triangle) {
+        let triangle = deserialize_triangle(&xml_document[node.range()], node, config)?;
         return Ok(Some(triangle.into()));
     }
 
     Ok(None)
 }
 
-pub fn serialize_abstract_surface_patch_kind(
+/// Deserializes `node` as an [`AbstractSurfacePatchKind`] given that
+/// `element` is already known to be `node`'s own type — see
+/// [`crate::codec::geometry::deserialize_abstract_geometry_kind_for`] for
+/// why this avoids a search over `node`.
+pub fn deserialize_abstract_surface_patch_kind_for(
+    element: GmlElement,
+    xml_document: &[u8],
+    node: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<Option<AbstractSurfacePatchKind>, Error> {
+    match element {
+        GmlElement::PolygonPatch => {
+            let polygon_patch = deserialize_polygon_patch(xml_document, node, config)?;
+            Ok(Some(polygon_patch.into()))
+        }
+        GmlElement::Triangle => {
+            let triangle = deserialize_triangle(xml_document, node, config)?;
+            Ok(Some(triangle.into()))
+        }
+        _ => Ok(None),
+    }
+}
+
+pub fn serialize_abstract_surface_patch_kind<W: Write>(
     abstract_surface_patch_kind: &AbstractSurfacePatchKind,
-    formatting: Formatting,
-) -> Result<XmlNode, Error> {
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
     match abstract_surface_patch_kind {
-        AbstractSurfacePatchKind::PolygonPatch(x) => serialize_polygon_patch(x, formatting),
-        AbstractSurfacePatchKind::Triangle(x) => serialize_triangle(x, formatting),
+        AbstractSurfacePatchKind::PolygonPatch(x) => {
+            serialize_polygon_patch(x, xml_fragment_writer)
+        }
+        AbstractSurfacePatchKind::Triangle(x) => serialize_triangle(x, xml_fragment_writer),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::codec::geometry::primitives::deserialize_abstract_surface_patch_kind;
-    use crate::util::extract_xml_element_spans;
+    use crate::util::XmlDocumentIndex;
     use egml_core::model::geometry::primitives::AbstractSurfacePatchKind;
 
     #[test]
@@ -49,11 +76,15 @@ mod tests {
                 </gml:exterior>
             </gml:PolygonPatch></>";
 
-        let spans = extract_xml_element_spans(xml_document).expect("extracting spans should work");
-        let surface_patch_kind: AbstractSurfacePatchKind =
-            deserialize_abstract_surface_patch_kind(xml_document.as_ref(), &spans)
-                .expect("should deserialize")
-                .expect("should be some");
+        let index =
+            XmlDocumentIndex::from_scan(xml_document, None).expect("extracting spans should work");
+        let surface_patch_kind: AbstractSurfacePatchKind = deserialize_abstract_surface_patch_kind(
+            xml_document.as_ref(),
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .expect("should deserialize")
+        .expect("should be some");
 
         if let AbstractSurfacePatchKind::PolygonPatch(x) = surface_patch_kind {
             assert!(x.exterior().is_some());

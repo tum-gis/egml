@@ -1,61 +1,61 @@
 use crate::Error;
-use crate::codec::base::{deserialize_abstract_gml, serialize_abstract_gml};
-use crate::codec::feature::bounding_shape::GmlBoundingShape;
-use crate::util::{
-    Formatting, GmlElement, XmlElementSpans, XmlNodeContent, XmlNodeParts, serialize_inner,
+use crate::codec::base::{
+    deserialize_abstract_gml, serialize_abstract_gml, serialize_abstract_gml_attributes,
 };
+use crate::codec::feature::bounding_shape::deserialize_bounding_shape;
+use crate::codec::feature::serialize_bounding_shape;
+use crate::util::{DeserializationConfig, GmlElement, XmlDocumentIndex, XmlFragmentWriter};
 use egml_core::model::base::AsAbstractGml;
-use egml_core::model::feature::{AbstractFeature, AsAbstractFeature, AsAbstractFeatureMut};
-use quick_xml::de;
-use serde::{Deserialize, Serialize};
+use egml_core::model::feature::{
+    AbstractFeature, AsAbstractFeature, AsAbstractFeatureMut, BoundingShape,
+};
+use std::io::Write;
 
 pub fn deserialize_abstract_feature(
     xml_document: &[u8],
-    spans: &XmlElementSpans<GmlElement>,
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
 ) -> Result<AbstractFeature, Error> {
-    let abstract_gml = deserialize_abstract_gml(xml_document, spans)?;
+    debug_assert!(
+        !index.is_truncated(),
+        "deserialize_abstract_feature received a truncated index — caller must scan to sufficient depth"
+    );
+
+    let abstract_gml = deserialize_abstract_gml(xml_document, index, config)?;
     let mut abstract_feature = AbstractFeature::from_abstract_gml(abstract_gml);
 
-    let parsed: GmlAbstractFeature = de::from_reader(xml_document)?;
-    abstract_feature.set_bounded_by(parsed.bounded_by.map(|x| x.try_into()).transpose()?);
+    let bounded_by: Option<BoundingShape> = index
+        .first(GmlElement::BoundedByProperty)
+        .map(|x| deserialize_bounding_shape(&xml_document[x.range()], x, config))
+        .transpose()?;
+    abstract_feature.set_bounded_by(bounded_by);
 
     Ok(abstract_feature)
 }
 
-pub fn serialize_abstract_feature(
+pub fn serialize_abstract_feature<W: Write>(
     abstract_feature: &AbstractFeature,
-    formatting: Formatting,
-) -> Result<XmlNodeParts, Error> {
-    let mut xml_node_parts = serialize_abstract_gml(abstract_feature.abstract_gml(), formatting)?;
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    serialize_abstract_gml(abstract_feature.abstract_gml(), xml_fragment_writer)?;
 
-    if let Some(raw) = serialize_inner(GmlAbstractFeature::from(abstract_feature), formatting)? {
-        xml_node_parts.content.push(XmlNodeContent::Raw(raw));
+    if let Some(bounded_by) = abstract_feature.bounded_by() {
+        serialize_bounding_shape(bounded_by, xml_fragment_writer)?;
     }
 
-    Ok(xml_node_parts)
+    Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, Default)]
-pub struct GmlAbstractFeature {
-    #[serde(
-        rename(serialize = "gml:boundedBy", deserialize = "boundedBy"),
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub bounded_by: Option<GmlBoundingShape>,
-}
-
-impl From<&AbstractFeature> for GmlAbstractFeature {
-    fn from(item: &AbstractFeature) -> Self {
-        Self {
-            bounded_by: item.bounded_by().map(|x| x.into()),
-        }
-    }
+pub fn serialize_abstract_feature_attributes(
+    abstract_feature: &AbstractFeature,
+) -> Vec<(String, String)> {
+    serialize_abstract_gml_attributes(abstract_feature.abstract_gml())
 }
 
 #[cfg(test)]
 mod tests {
     use crate::codec::feature::abstract_feature::deserialize_abstract_feature;
-    use crate::util::{GmlElement, XmlElementSpans, extract_xml_element_spans};
+    use crate::util::{GmlElement, XmlDocumentIndex};
     use egml_core::model::feature::{AbstractFeature, AsAbstractFeature};
     use egml_core::model::geometry::Envelope;
 
@@ -70,10 +70,14 @@ mod tests {
     </gml:boundedBy>
 </ExampleFeature>";
 
-        let spans: XmlElementSpans<GmlElement> =
-            extract_xml_element_spans(xml_document).expect("should work");
-        let abstract_feature: AbstractFeature =
-            deserialize_abstract_feature(xml_document.as_ref(), &spans).unwrap();
+        let index: XmlDocumentIndex<GmlElement> =
+            XmlDocumentIndex::from_scan(xml_document, None).expect("should work");
+        let abstract_feature: AbstractFeature = deserialize_abstract_feature(
+            xml_document.as_ref(),
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap();
 
         let envelope: Envelope = abstract_feature
             .bounded_by()

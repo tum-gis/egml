@@ -1,60 +1,72 @@
 use crate::Error;
-use crate::codec::base::{deserialize_abstract_gml, serialize_abstract_gml};
-use crate::util::{Formatting, GmlElement, XmlElementSpans, XmlNodeParts};
+use crate::codec::base::{
+    deserialize_abstract_gml, serialize_abstract_gml, serialize_abstract_gml_attributes,
+};
+use crate::util::{
+    DeserializationConfig, GmlAttribute, GmlElement, XmlDocumentIndex, XmlElement,
+    XmlFragmentWriter, deserialize_gml_attributes,
+};
 use egml_core::model::base::AsAbstractGml;
 use egml_core::model::geometry::{AbstractGeometry, AsAbstractGeometry, AsAbstractGeometryMut};
-use quick_xml::de;
-use serde::{Deserialize, Serialize};
+use std::io::Write;
 
 pub fn deserialize_abstract_geometry(
     xml_document: &[u8],
-    spans: &XmlElementSpans<GmlElement>,
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
 ) -> Result<AbstractGeometry, Error> {
-    let abstract_gml = deserialize_abstract_gml(xml_document, spans)?;
+    debug_assert!(
+        !index.is_truncated(),
+        "deserialize_abstract_geometry received a truncated index — caller must scan to sufficient depth"
+    );
+
+    let abstract_gml = deserialize_abstract_gml(xml_document, index, config)?;
     let mut abstract_geometry = AbstractGeometry::from_abstract_gml(abstract_gml);
 
-    let parsed: GmlAbstractGeometry = de::from_reader(xml_document)?;
-    abstract_geometry.set_srs_name_opt(parsed.srs_name);
-    abstract_geometry.set_srs_dimension_opt(parsed.srs_dimension);
+    let attributes = deserialize_gml_attributes(xml_document)?;
+    let srs_dimension: Option<u32> = attributes
+        .get(&GmlAttribute::SrsDimension)
+        .map(|s| {
+            s.parse()
+                .map_err(|_| egml_core::Error::InvalidAttributeValue {
+                    attribute: "srsDimension",
+                    value: s.clone(),
+                })
+        })
+        .transpose()?;
+    abstract_geometry.set_srs_dimension_opt(srs_dimension);
+
+    let srs_name: Option<String> = attributes.get(&GmlAttribute::SrsName).cloned();
+    abstract_geometry.set_srs_name_opt(srs_name);
 
     Ok(abstract_geometry)
 }
 
-pub fn serialize_abstract_geometry(
+pub fn serialize_abstract_geometry<W: Write>(
     abstract_geometry: &AbstractGeometry,
-    formatting: Formatting,
-) -> Result<XmlNodeParts, Error> {
-    let mut xml_node_parts = serialize_abstract_gml(abstract_geometry.abstract_gml(), formatting)?;
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    serialize_abstract_gml(abstract_geometry.abstract_gml(), xml_fragment_writer)
+}
 
-    if let Some(srs_name) = &abstract_geometry.srs_name() {
-        xml_node_parts
-            .attributes
-            .push(("srsName".to_string(), srs_name.to_string()));
-    }
+pub fn serialize_abstract_geometry_attributes(
+    abstract_geometry: &AbstractGeometry,
+) -> Vec<(String, String)> {
+    let mut attributes = serialize_abstract_gml_attributes(abstract_geometry.abstract_gml());
 
     if let Some(srs_dimension) = &abstract_geometry.srs_dimension() {
-        xml_node_parts
-            .attributes
-            .push(("srsDimension".to_string(), srs_dimension.to_string()));
+        attributes.push((
+            GmlAttribute::SrsDimension.local_name().to_string(),
+            srs_dimension.to_string(),
+        ));
     }
 
-    Ok(xml_node_parts)
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub struct GmlAbstractGeometry {
-    #[serde(rename(deserialize = "@srsName"), skip_serializing)]
-    pub srs_name: Option<String>,
-
-    #[serde(rename(deserialize = "@srsDimension"), skip_serializing)]
-    pub srs_dimension: Option<u32>,
-}
-
-impl From<&AbstractGeometry> for GmlAbstractGeometry {
-    fn from(item: &AbstractGeometry) -> Self {
-        Self {
-            srs_name: item.srs_name().cloned(),
-            srs_dimension: item.srs_dimension(),
-        }
+    if let Some(srs_name) = &abstract_geometry.srs_name() {
+        attributes.push((
+            GmlAttribute::SrsName.local_name().to_string(),
+            srs_name.to_string(),
+        ));
     }
+
+    attributes
 }

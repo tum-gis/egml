@@ -22,7 +22,9 @@ const MINIMUM_NUMBER_OF_POINTS: usize = 3;
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LinearRing {
     pub abstract_ring: AbstractRing,
-    points: Vec<DirectPosition>,
+    /// Boxed slice rather than `Vec`: points are written once and then only
+    /// read or transformed in place, so the capacity field would be dead weight.
+    points: Box<[DirectPosition]>,
 }
 
 impl LinearRing {
@@ -39,7 +41,7 @@ impl LinearRing {
 
         Ok(Self {
             abstract_ring: AbstractRing::default(),
-            points,
+            points: points.into_boxed_slice(),
         })
     }
 
@@ -51,7 +53,7 @@ impl LinearRing {
         Self::validate_points(&points, None)?;
         Ok(Self {
             abstract_ring,
-            points,
+            points: points.into_boxed_slice(),
         })
     }
 
@@ -107,7 +109,7 @@ impl LinearRing {
     pub fn set_points(&mut self, val: Vec<DirectPosition>) -> Result<(), Error> {
         Self::validate_points(&val, self.id())?;
 
-        self.points = val;
+        self.points = val.into_boxed_slice();
         Ok(())
     }
 }
@@ -129,8 +131,19 @@ impl_abstract_ring_mut_traits!(LinearRing);
 impl_has_geometry_type!(LinearRing, LinearRing);
 
 impl LinearRing {
+    /// Returns the 3D perimeter of this ring.
+    ///
+    /// Sums the distances between consecutive vertices, including the implicit
+    /// closing segment from the last vertex back to the first.
     pub fn length_3d(&self) -> f64 {
-        todo!("needs to be implemented for LinearRing")
+        let n = self.points.len();
+        (0..n)
+            .map(|i| {
+                let vi: Vector3<f64> = self.points[i].into();
+                let vj: Vector3<f64> = self.points[(i + 1) % n].into();
+                (vj - vi).norm()
+            })
+            .sum()
     }
 
     /// Returns the 3D area_3d of this ring using the cross-product summation formula.
@@ -198,6 +211,30 @@ impl IterGeometries for LinearRing {
 mod test {
     use super::*;
     use nalgebra::{Isometry3, Vector3};
+
+    #[test]
+    fn length_3d_unit_square_includes_closing_segment() {
+        let ring = LinearRing::new([
+            DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(1.0, 1.0, 0.0).unwrap(),
+            DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
+        ])
+        .unwrap();
+        assert!((ring.length_3d() - 4.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn length_3d_right_triangle_in_3d() {
+        // 3-4-5 right triangle in the XZ plane — perimeter 12.
+        let ring = LinearRing::new([
+            DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(3.0, 0.0, 0.0).unwrap(),
+            DirectPosition::new(3.0, 0.0, 4.0).unwrap(),
+        ])
+        .unwrap();
+        assert!((ring.length_3d() - 12.0).abs() < 1e-10);
+    }
 
     #[test]
     fn area_3d_unit_square_xy() {

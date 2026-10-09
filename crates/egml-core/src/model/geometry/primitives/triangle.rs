@@ -1,7 +1,7 @@
 use crate::Error;
 use crate::model::common::{ApplyTransform, ComputeEnvelope, Triangulate, Triangulation};
 use crate::model::geometry::primitives::{
-    AbstractRingProperty, AbstractSurfacePatch, AsAbstractSurfacePatch, AsAbstractSurfacePatchMut,
+    AbstractRingKind, AbstractSurfacePatch, AsAbstractSurfacePatch, AsAbstractSurfacePatchMut,
     LinearRing, TriangulatedSurface,
 };
 use crate::model::geometry::{DirectPosition, Envelope};
@@ -11,11 +11,11 @@ use parry3d_f64::query::PointQuery;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Triangle {
     pub abstract_surface_patch: AbstractSurfacePatch,
-    exterior: AbstractRingProperty,
+    exterior: AbstractRingKind,
 }
 
 impl Triangle {
-    pub fn new(exterior: AbstractRingProperty) -> Result<Self, Error> {
+    pub fn new(exterior: AbstractRingKind) -> Result<Self, Error> {
         Self::validate(&exterior)?;
 
         Ok(Self {
@@ -24,7 +24,7 @@ impl Triangle {
         })
     }
 
-    pub(crate) fn new_unchecked(exterior: AbstractRingProperty) -> Self {
+    pub(crate) fn new_unchecked(exterior: AbstractRingKind) -> Self {
         Self {
             abstract_surface_patch: AbstractSurfacePatch::default(),
             exterior,
@@ -33,7 +33,7 @@ impl Triangle {
 
     pub fn from_abstract_surface_patch(
         abstract_surface_patch: AbstractSurfacePatch,
-        exterior: AbstractRingProperty,
+        exterior: AbstractRingKind,
     ) -> Result<Self, Error> {
         Self::validate(&exterior)?;
 
@@ -49,7 +49,7 @@ impl Triangle {
         c: DirectPosition,
     ) -> Result<Self, Error> {
         let linear_ring = LinearRing::new([a, b, c])?;
-        let exterior = AbstractRingProperty::from_object(linear_ring.into());
+        let exterior = AbstractRingKind::LinearRing(linear_ring);
 
         Ok(Self {
             abstract_surface_patch: AbstractSurfacePatch::default(),
@@ -60,7 +60,7 @@ impl Triangle {
     pub fn from_points_unchecked(a: DirectPosition, b: DirectPosition, c: DirectPosition) -> Self {
         let linear_ring =
             LinearRing::new([a, b, c]).expect("from points unchecked: LinearRing::new");
-        let exterior = AbstractRingProperty::from_object(linear_ring.into());
+        let exterior = AbstractRingKind::LinearRing(linear_ring);
 
         Self {
             abstract_surface_patch: AbstractSurfacePatch::default(),
@@ -68,36 +68,34 @@ impl Triangle {
         }
     }
 
-    fn validate(exterior: &AbstractRingProperty) -> Result<(), Error> {
-        if let Some(object) = exterior.object() {
-            let len = object.points().len();
-            if len != 3 {
-                return Err(Error::InvalidElementCount {
-                    geometry: "Triangle",
-                    expected: 3,
-                    actual: len,
-                    spec: Some("OGC 07-036 §10.5.12"),
-                });
-            }
+    fn validate(exterior: &AbstractRingKind) -> Result<(), Error> {
+        let len = exterior.points().len();
+        if len != 3 {
+            return Err(Error::InvalidElementCount {
+                geometry: "Triangle",
+                expected: 3,
+                actual: len,
+                spec: Some("OGC 07-036 §10.5.12"),
+            });
         }
 
         Ok(())
     }
 
-    pub fn exterior(&self) -> &AbstractRingProperty {
+    pub fn exterior(&self) -> &AbstractRingKind {
         &self.exterior
     }
 
     pub fn a(&self) -> &DirectPosition {
-        &self.exterior.object().unwrap().points()[0]
+        &self.exterior.points()[0]
     }
 
     pub fn b(&self) -> &DirectPosition {
-        &self.exterior.object().unwrap().points()[1]
+        &self.exterior.points()[1]
     }
 
     pub fn c(&self) -> &DirectPosition {
-        &self.exterior.object().unwrap().points()[2]
+        &self.exterior.points()[2]
     }
 }
 
@@ -133,39 +131,29 @@ impl Triangle {
 
 impl ApplyTransform for Triangle {
     fn apply_transform(&mut self, transform: Transform3<f64>) {
-        if let Some(object) = self.exterior.object_mut() {
-            object.apply_transform(transform);
-        }
+        self.exterior.apply_transform(transform);
     }
 
     fn apply_isometry(&mut self, isometry: Isometry3<f64>) {
-        if let Some(object) = self.exterior.object_mut() {
-            object.apply_isometry(isometry);
-        }
+        self.exterior.apply_isometry(isometry);
     }
 
     fn apply_translation(&mut self, vector: Vector3<f64>) {
-        if let Some(object) = self.exterior.object_mut() {
-            object.apply_translation(vector);
-        }
+        self.exterior.apply_translation(vector);
     }
 
     fn apply_rotation(&mut self, rotation: Rotation3<f64>) {
-        if let Some(object) = self.exterior.object_mut() {
-            object.apply_rotation(rotation);
-        }
+        self.exterior.apply_rotation(rotation);
     }
 
     fn apply_scale(&mut self, scale: Scale3<f64>) {
-        if let Some(object) = self.exterior.object_mut() {
-            object.apply_scale(scale);
-        }
+        self.exterior.apply_scale(scale);
     }
 }
 
 impl ComputeEnvelope for Triangle {
     fn compute_envelope(&self) -> Option<Envelope> {
-        self.exterior.object()?.compute_envelope()
+        self.exterior.compute_envelope()
     }
 }
 
@@ -195,7 +183,7 @@ mod tests {
             DirectPosition::new(1.0, 1.0, 1.0).unwrap(),
         ])
         .expect("should work");
-        let triangle_result = Triangle::new(AbstractRingProperty::from_object(linear_ring.into()));
+        let triangle_result = Triangle::new(linear_ring.into());
 
         assert!(matches!(
             triangle_result,
@@ -211,8 +199,7 @@ mod tests {
             DirectPosition::new(1.0, 1.0, 0.0).unwrap(),
         ])
         .expect("LinearRing::new");
-        let triangle =
-            Triangle::new(AbstractRingProperty::from_object(linear_ring.into())).unwrap();
+        let triangle = Triangle::new(linear_ring.into()).unwrap();
 
         let distance =
             triangle.distance_to_local_point(&DirectPosition::new(0.5, 0.5, 1.0).unwrap());

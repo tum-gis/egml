@@ -37,6 +37,7 @@ mod direct_position_list;
 mod envelope;
 pub mod primitives;
 pub mod refs;
+mod srs_reference_group;
 
 pub use self::abstract_geometry::*;
 pub use self::abstract_geometry_array_property::*;
@@ -45,3 +46,4 @@ pub use self::abstract_geometry_property::*;
 pub use self::direct_position::*;
 pub use self::direct_position_list::*;
 pub use self::envelope::*;
+pub use self::srs_reference_group::*;

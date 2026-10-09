@@ -8,6 +8,9 @@ pub enum Error {
     #[error(transparent)]
     EgmlError(#[from] egml_core::Error),
 
+    #[error(transparent)]
+    StdError(#[from] std::io::Error),
+
     /// Wraps a low-level XML syntax error from `quick-xml`.
     #[error(transparent)]
     Xml(#[from] quick_xml::Error),
@@ -63,4 +66,15 @@ pub enum Error {
     /// The GML input uses XLink references (`xlink:href`), which are not yet resolved.
     #[error("XLinks are not supported yet")]
     UnsupportedXLink,
+
+    /// Element text is not a valid lexical representation of an XML Schema
+    /// datatype ([XSD 1.1 Part 2](https://www.w3.org/TR/xmlschema11-2/)).
+    ///
+    /// `datatype` names the expected type (e.g. `"xs:date"`); `value` is the
+    /// raw text that was found.
+    #[error("'{value}' is not a valid lexical value for {datatype}")]
+    InvalidLexicalValue {
+        datatype: &'static str,
+        value: String,
+    },
 }

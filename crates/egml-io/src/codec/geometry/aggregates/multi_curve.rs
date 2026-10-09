@@ -1,24 +1,37 @@
 use crate::Error;
 use crate::codec::geometry::aggregates::{
     deserialize_abstract_geometric_aggregate, serialize_abstract_geometric_aggregate,
+    serialize_abstract_geometric_aggregate_attributes,
 };
 use crate::codec::geometry::primitives::{
     deserialize_abstract_curve_property, serialize_abstract_curve_property,
 };
 use crate::util::{
-    Formatting, GmlElement, XmlNode, XmlNodeContent, collect_children, extract_xml_element_spans,
+    DeserializationConfig, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter,
+    collect_children,
 };
 use egml_core::model::geometry::aggregates::{AsAbstractGeometricAggregate, MultiCurve};
+use std::io::Write;
 
-pub fn deserialize_multi_curve(xml_document: &[u8]) -> Result<MultiCurve, Error> {
-    let spans = extract_xml_element_spans(xml_document)?;
+pub fn deserialize_multi_curve(
+    xml_document: &[u8],
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<MultiCurve, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
+
     let abstract_geometric_aggregate =
-        deserialize_abstract_geometric_aggregate(xml_document, &spans)?;
+        deserialize_abstract_geometric_aggregate(xml_document, index, config)?;
 
     let surface_members = collect_children(
         xml_document,
-        &spans,
+        index,
         GmlElement::CurveMemberProperty,
+        config,
         deserialize_abstract_curve_property,
     )?;
 
@@ -28,34 +41,57 @@ pub fn deserialize_multi_curve(xml_document: &[u8]) -> Result<MultiCurve, Error>
     )?)
 }
 
-pub fn serialize_multi_curve(
+pub fn serialize_multi_curve<W: Write>(
     multi_curve: &MultiCurve,
-    formatting: Formatting,
-) -> Result<XmlNode, Error> {
-    let mut parts = serialize_abstract_geometric_aggregate(
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    let attributes = serialize_multi_curve_attributes(multi_curve);
+
+    xml_fragment_writer.write_start_event_with_attributes(
+        GmlNamespace::Gml,
+        GmlElement::MultiCurve,
+        attributes,
+    )?;
+
+    serialize_abstract_geometric_aggregate(
         multi_curve.abstract_geometric_aggregate(),
-        formatting,
+        xml_fragment_writer,
     )?;
 
     for member in multi_curve.curve_member() {
-        parts
-            .content
-            .push(XmlNodeContent::Child(serialize_abstract_curve_property(
-                member,
-                formatting,
-                GmlElement::CurveMemberProperty.into(),
-            )?));
+        serialize_abstract_curve_property(
+            member,
+            xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::CurveMemberProperty,
+        )?;
     }
 
-    Ok(XmlNode::new(GmlElement::MultiCurve.into(), parts))
+    xml_fragment_writer.write_end_event(GmlNamespace::Gml, GmlElement::MultiCurve)?;
+
+    Ok(())
+}
+
+pub fn serialize_multi_curve_attributes(multi_curve: &MultiCurve) -> Vec<(String, String)> {
+    serialize_abstract_geometric_aggregate_attributes(multi_curve.abstract_geometric_aggregate())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::geometry::aggregates::multi_curve::{
-        deserialize_multi_curve, serialize_multi_curve,
-    };
-    use crate::util::Formatting;
+    // Test-only convenience: builds the index the real function now
+    // requires, so existing single-argument call sites below don't all
+    // need to construct one by hand.
+    fn deserialize(xml_document: &[u8]) -> Result<super::MultiCurve, crate::Error> {
+        let index = crate::util::XmlDocumentIndex::from_scan(xml_document, None)?;
+        super::deserialize_multi_curve(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+    }
+
+    use crate::codec::geometry::aggregates::multi_curve::serialize_multi_curve;
+    use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::aggregates::MultiCurve;
     use egml_core::model::geometry::primitives::LineString;
@@ -81,15 +117,16 @@ mod tests {
                   </gml:curveMember>
                 </gml:MultiCurve>";
 
-        let multi_curve: MultiCurve = deserialize_multi_curve(xml_document.as_ref()).unwrap();
+        let multi_curve: MultiCurve = deserialize(xml_document.as_ref()).unwrap();
         assert_eq!(multi_curve.curve_member().len(), 1);
     }
 
     #[test]
     fn serialize_multi_curve_writes_gml_tags() {
         let multi_curve = make_multi_curve();
-        let xml_node = serialize_multi_curve(&multi_curve, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_multi_curve(&multi_curve, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert!(xml.contains("<gml:MultiCurve"));
         assert!(xml.contains("<gml:curveMember"));
@@ -101,10 +138,11 @@ mod tests {
     #[test]
     fn round_trip_multi_curve_preserves_member_count() {
         let multi_curve = make_multi_curve();
-        let xml_node = serialize_multi_curve(&multi_curve, Formatting::Compact).unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_multi_curve(&multi_curve, &mut xml_fragment_writer).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
-        let recovered = deserialize_multi_curve(xml.as_bytes()).unwrap();
+        let recovered = deserialize(xml.as_bytes()).unwrap();
 
         assert_eq!(
             recovered.curve_member().len(),
@@ -118,10 +156,11 @@ mod tests {
             <gml:curveMember><gml:LineString><gml:posList srsDimension=\"3\">0 0 0 1 1 1 2 2 2</gml:posList></gml:LineString></gml:curveMember>\
             </gml:MultiCurve>";
 
-        let multi_curve: MultiCurve = deserialize_multi_curve(input_xml.as_bytes()).unwrap();
+        let multi_curve: MultiCurve = deserialize(input_xml.as_bytes()).unwrap();
 
-        let output_xml_node = serialize_multi_curve(&multi_curve, Formatting::Compact).unwrap();
-        let output_xml = output_xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_multi_curve(&multi_curve, &mut xml_fragment_writer).unwrap();
+        let output_xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert_eq!(input_xml, output_xml);
     }

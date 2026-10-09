@@ -1,7 +1,7 @@
 use crate::Error;
 use crate::model::geometry::DirectPosition;
 use crate::model::geometry::primitives::{
-    AbstractRingKind, AbstractRingProperty, LinearRing, Triangle, TriangulatedSurface,
+    AbstractRingKind, LinearRing, Triangle, TriangulatedSurface,
 };
 
 /// Triangulates a polygon defined by an exterior ring and optional interior (hole) rings.
@@ -11,40 +11,20 @@ use crate::model::geometry::primitives::{
 ///
 /// # Errors
 ///
+/// Returns [`Error::MissingExteriorRing`] if `exterior` is `None`.
 /// Returns [`Error::TriangulationFailed`] if the earcut algorithm produces no triangles
 /// (e.g. degenerate or self-intersecting input).
-///
-/// # Panics
-///
-/// Currently panics (via `todo!`) if `exterior` is `None` or if non-`LinearRing`
-/// ring kinds are supplied.  These cases are not yet implemented.
 pub fn triangulate(
-    exterior: Option<AbstractRingProperty>,
-    interior: Vec<AbstractRingProperty>,
+    exterior: Option<AbstractRingKind>,
+    interior: Vec<AbstractRingKind>,
 ) -> Result<TriangulatedSurface, Error> {
-    let mut exterior = match exterior {
-        Some(ring) => ring,
-        None => {
-            todo!("triangulate polygon with no exterior ring needs to be implemented")
-        }
-    };
-
-    let exterior = match exterior
-        .take_object()
-        .expect("triangulate: exterior ring is not None")
-    {
-        AbstractRingKind::LinearRing(x) => x,
-        _ => todo!("triangulate polygon with non-linear exterior ring needs to be implemented"),
-    };
+    let exterior = exterior
+        .ok_or(Error::MissingExteriorRing)?
+        .into_linear_ring();
 
     let interior = interior
-        .iter()
-        .map(
-            |x| match x.object().expect("triangulate: exterior ring is not None") {
-                AbstractRingKind::LinearRing(x) => x.clone(),
-                _ => todo!("needs to be implemented"),
-            },
-        )
+        .into_iter()
+        .map(AbstractRingKind::into_linear_ring)
         .collect::<Vec<_>>();
 
     if interior.is_empty() {
@@ -85,7 +65,9 @@ fn triangulate_without_holes(exterior: LinearRing) -> Result<TriangulatedSurface
     }
 
     let triangles: Vec<Triangle> = triangle_indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|x| {
             let vertex_a = exterior.points()[x[0]];
             let vertex_b = exterior.points()[x[1]];
@@ -135,7 +117,9 @@ fn triangulate_with_holes(
     );
 
     let triangles: Vec<Triangle> = triangle_indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|x| {
             let vertex_a = all_direct_positions[x[0]];
             let vertex_b = all_direct_positions[x[1]];
@@ -156,6 +140,41 @@ mod test {
     use nalgebra::{Isometry3, Vector3};
 
     #[test]
+    fn triangulate_without_exterior_ring() {
+        assert_eq!(triangulate(None, vec![]), Err(Error::MissingExteriorRing));
+    }
+
+    fn square_ring(min: f64, max: f64) -> LinearRing {
+        LinearRing::new([
+            DirectPosition::new(min, min, 0.0).unwrap(),
+            DirectPosition::new(max, min, 0.0).unwrap(),
+            DirectPosition::new(max, max, 0.0).unwrap(),
+            DirectPosition::new(min, max, 0.0).unwrap(),
+        ])
+        .unwrap()
+    }
+
+    fn nested(ring: LinearRing) -> AbstractRingKind {
+        AbstractRingKind::AbstractRingKind(Box::new(AbstractRingKind::LinearRing(ring)))
+    }
+
+    #[test]
+    fn triangulate_nested_exterior_ring() {
+        let result = triangulate(Some(nested(square_ring(0.0, 1.0))), vec![]).unwrap();
+        assert!((result.area_3d().unwrap() - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn triangulate_nested_interior_ring() {
+        let result = triangulate(
+            Some(AbstractRingKind::LinearRing(square_ring(0.0, 4.0))),
+            vec![nested(square_ring(1.0, 2.0))],
+        )
+        .unwrap();
+        assert!((result.area_3d().unwrap() - 15.0).abs() < 1e-10);
+    }
+
+    #[test]
     fn triangulate_test() {
         let linear_ring = LinearRing::new([
             DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
@@ -168,8 +187,8 @@ mod test {
         let result = triangulate_without_holes(linear_ring).unwrap();
 
         assert_eq!(result.patches_len(), 2);
-        assert!(result.patches().objects()[0].area_3d().unwrap() > 0.0);
-        assert!(result.patches().objects()[1].area_3d().unwrap() > 0.0);
+        assert!(result.patches()[0].area_3d().unwrap() > 0.0);
+        assert!(result.patches()[1].area_3d().unwrap() > 0.0);
     }
 
     #[test]

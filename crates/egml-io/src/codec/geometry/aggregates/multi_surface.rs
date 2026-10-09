@@ -1,26 +1,38 @@
 use crate::Error;
 use crate::codec::geometry::aggregates::{
     deserialize_abstract_geometric_aggregate, serialize_abstract_geometric_aggregate,
+    serialize_abstract_geometric_aggregate_attributes,
 };
 use crate::codec::geometry::primitives::{
     deserialize_abstract_surface_property, serialize_abstract_surface_property,
 };
 use crate::util::{
-    Formatting, GmlElement, XmlNode, XmlNodeContent, collect_children_lenient,
-    extract_xml_element_spans,
+    DeserializationConfig, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter,
+    collect_children_lenient,
 };
 use egml_core::model::geometry::aggregates::{AsAbstractGeometricAggregate, MultiSurface};
+use std::io::Write;
 use tracing::debug;
 
-pub fn deserialize_multi_surface(xml_document: &[u8]) -> Result<MultiSurface, Error> {
-    let spans = extract_xml_element_spans(xml_document)?;
+pub fn deserialize_multi_surface(
+    xml_document: &[u8],
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
+) -> Result<MultiSurface, Error> {
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
+
     let abstract_geometric_aggregate =
-        deserialize_abstract_geometric_aggregate(xml_document, &spans)?;
+        deserialize_abstract_geometric_aggregate(xml_document, index, config)?;
 
     let (surface_members, skipped) = collect_children_lenient(
         xml_document,
-        &spans,
+        index,
         GmlElement::SurfaceMemberProperty,
+        config,
         deserialize_abstract_surface_property,
     );
     if !skipped.is_empty() {
@@ -36,43 +48,62 @@ pub fn deserialize_multi_surface(xml_document: &[u8]) -> Result<MultiSurface, Er
     )?)
 }
 
-pub fn serialize_multi_surface(
+pub fn serialize_multi_surface<W: Write>(
     multi_surface: &MultiSurface,
-    formatting: Formatting,
-) -> Result<XmlNode, Error> {
-    let mut xml_node_parts = serialize_abstract_geometric_aggregate(
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+) -> Result<(), Error> {
+    let attributes = serialize_multi_surface_attributes(multi_surface);
+
+    xml_fragment_writer.write_start_event_with_attributes(
+        GmlNamespace::Gml,
+        GmlElement::MultiSurface,
+        attributes,
+    )?;
+
+    serialize_abstract_geometric_aggregate(
         multi_surface.abstract_geometric_aggregate(),
-        formatting,
+        xml_fragment_writer,
     )?;
 
     for member in multi_surface.surface_member() {
-        xml_node_parts
-            .content
-            .push(XmlNodeContent::Child(serialize_abstract_surface_property(
-                member,
-                formatting,
-                GmlElement::SurfaceMemberProperty.into(),
-            )?));
+        serialize_abstract_surface_property(
+            member,
+            xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::SurfaceMemberProperty,
+        )?;
     }
 
-    Ok(XmlNode::new(
-        GmlElement::MultiSurface.into(),
-        xml_node_parts,
-    ))
+    xml_fragment_writer.write_end_event(GmlNamespace::Gml, GmlElement::MultiSurface)?;
+
+    Ok(())
+}
+
+pub fn serialize_multi_surface_attributes(multi_surface: &MultiSurface) -> Vec<(String, String)> {
+    serialize_abstract_geometric_aggregate_attributes(multi_surface.abstract_geometric_aggregate())
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::codec::geometry::aggregates::multi_surface::{
-        deserialize_multi_surface, serialize_multi_surface,
-    };
-    use crate::util::Formatting;
+    // Test-only convenience: builds the index the real function now
+    // requires, so existing single-argument call sites below don't all
+    // need to construct one by hand.
+    fn deserialize(xml_document: &[u8]) -> Result<super::MultiSurface, crate::Error> {
+        let index = crate::util::XmlDocumentIndex::from_scan(xml_document, None)?;
+        super::deserialize_multi_surface(
+            xml_document,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+    }
+
+    use crate::codec::geometry::aggregates::multi_surface::serialize_multi_surface;
+    use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::base::{AsAbstractGml, AsAbstractGmlMut};
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::aggregates::MultiSurface;
     use egml_core::model::geometry::primitives::{
-        AbstractRingKind, AbstractRingProperty, AbstractSurfaceKind, AbstractSurfaceProperty,
-        LinearRing, Polygon,
+        AbstractRingKind, AbstractSurfaceKind, AbstractSurfaceProperty, LinearRing, Polygon,
     };
 
     fn make_multi_surface() -> MultiSurface {
@@ -82,7 +113,7 @@ mod tests {
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
         let ring_kind = AbstractRingKind::LinearRing(LinearRing::new(points).unwrap());
-        let polygon = Polygon::new(Some(AbstractRingProperty::from_object(ring_kind)), []).unwrap();
+        let polygon = Polygon::new(Some(ring_kind), []).unwrap();
         MultiSurface::new([AbstractSurfaceProperty::from_object(
             AbstractSurfaceKind::Polygon(polygon),
         )])
@@ -126,7 +157,7 @@ mod tests {
                 </gml:surfaceMember>
             </gml:MultiSurface>";
 
-        let result = deserialize_multi_surface(xml_document).unwrap();
+        let result = deserialize(xml_document).unwrap();
         assert_eq!(result.surface_member().len(), 1);
     }
 
@@ -144,7 +175,7 @@ mod tests {
               </gml:surfaceMember>
             </gml:MultiSurface>";
 
-        let result = deserialize_multi_surface(xml_document).unwrap();
+        let result = deserialize(xml_document).unwrap();
         assert_eq!(result.surface_member().len(), 1);
     }
 
@@ -162,7 +193,7 @@ mod tests {
               </gml:surfaceMember>
             </gml:MultiSurface>";
 
-        let result = deserialize_multi_surface(xml_document).unwrap();
+        let result = deserialize(xml_document).unwrap();
         assert_eq!(result.surface_member().len(), 1);
     }
 
@@ -186,7 +217,7 @@ mod tests {
               </gml:surfaceMember>
             </gml:MultiSurface>";
 
-        let result = deserialize_multi_surface(xml_document).unwrap();
+        let result = deserialize(xml_document).unwrap();
         assert_eq!(result.surface_member().len(), 1);
     }
 
@@ -204,7 +235,7 @@ mod tests {
               </gml:surfaceMember>
             </gml:MultiSurface>";
 
-        let result = deserialize_multi_surface(xml_document).unwrap();
+        let result = deserialize(xml_document).unwrap();
         assert_eq!(result.surface_member().len(), 1);
     }
 
@@ -231,7 +262,7 @@ mod tests {
               </gml:surfaceMember>
             </gml:MultiSurface>";
 
-        let result = deserialize_multi_surface(xml_document).unwrap();
+        let result = deserialize(xml_document).unwrap();
         assert_eq!(result.surface_member().len(), 1);
     }
 
@@ -266,7 +297,7 @@ mod tests {
     </gml:surfaceMember>
 </gml:MultiSurface>";
 
-        let result = deserialize_multi_surface(xml_document).unwrap();
+        let result = deserialize(xml_document).unwrap();
         assert_eq!(result.surface_member().len(), 2);
     }
 
@@ -303,7 +334,7 @@ mod tests {
               </gml:surfaceMember>
             </gml:MultiSurface>";
 
-        let multi_surface = deserialize_multi_surface(xml_document).expect("should deserialize");
+        let multi_surface = deserialize(xml_document).expect("should deserialize");
         assert_eq!(multi_surface.surface_member().len(), 2);
 
         let triangulation = multi_surface
@@ -317,11 +348,10 @@ mod tests {
     fn serialize_multi_surface_writes_gml_tags() {
         let multi_surface = make_multi_surface();
 
-        let xml_node =
-            serialize_multi_surface(&multi_surface, Formatting::Compact).expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_multi_surface(&multi_surface, &mut xml_fragment_writer)
+            .expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert!(xml.contains("<gml:MultiSurface"));
         assert!(xml.contains("<gml:surfaceMember"));
@@ -338,11 +368,10 @@ mod tests {
         let mut multi_surface = make_multi_surface();
         multi_surface.set_id(Id::try_from("test-id").unwrap());
 
-        let xml_node =
-            serialize_multi_surface(&multi_surface, Formatting::Compact).expect("should serialize");
-        let xml = xml_node
-            .to_string(Formatting::Compact)
-            .expect("to string should work");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_multi_surface(&multi_surface, &mut xml_fragment_writer)
+            .expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert!(xml.contains("gml:id=\"test-id\""));
     }
@@ -351,10 +380,12 @@ mod tests {
     fn round_trip_multi_surface_preserves_member_count() {
         let multi_surface = make_multi_surface();
 
-        let xml_node =
-            serialize_multi_surface(&multi_surface, Formatting::Compact).expect("should serialize");
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
-        let recovered = deserialize_multi_surface(xml.as_bytes()).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_multi_surface(&multi_surface, &mut xml_fragment_writer)
+            .expect("should serialize");
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
+
+        let recovered = deserialize(xml.as_bytes()).unwrap();
 
         assert_eq!(
             recovered.surface_member().len(),
@@ -370,13 +401,13 @@ mod tests {
             </gml:LinearRing></gml:exterior></gml:Polygon></gml:surfaceMember>\
             </gml:MultiSurface>";
 
-        let multi_surface = deserialize_multi_surface(input_xml).expect("should deserialize");
-        let xml_node =
-            serialize_multi_surface(&multi_surface, Formatting::Compact).expect("should serialize");
-        let output = xml_node.to_string(Formatting::Compact).unwrap();
+        let multi_surface = deserialize(input_xml).expect("should deserialize");
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_multi_surface(&multi_surface, &mut xml_fragment_writer)
+            .expect("should serialize");
+        let output = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
-        let recovered =
-            deserialize_multi_surface(output.as_bytes()).expect("should deserialize recovered");
+        let recovered = deserialize(output.as_bytes()).expect("should deserialize recovered");
 
         assert_eq!(
             recovered.surface_member().len(),

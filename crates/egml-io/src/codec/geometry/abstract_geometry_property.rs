@@ -1,80 +1,84 @@
 use crate::Error;
 use crate::codec::base::{
-    GmlAssociationAttributes, GmlOwnershipAttributes, serialize_association_attributes,
-    serialize_ownership_attributes,
+    deserialize_association_and_ownership_attributes,
+    serialize_association_and_ownership_attributes,
 };
 use crate::codec::geometry::{
     deserialize_abstract_geometry_kind, serialize_abstract_geometry_kind,
 };
-use crate::util::{Formatting, GmlElement, XmlElementSpans, XmlNode, XmlNodeContent, XmlNodeParts};
+use crate::util::{
+    DeserializationConfig, GmlElement, XmlDocumentIndex, XmlElement, XmlFragmentWriter,
+    XmlNamespace,
+};
 use egml_core::model::base::{HasAssociationAttributes, HasOwnershipAttributes};
 use egml_core::model::geometry::AbstractGeometryProperty;
-use quick_xml::de;
-use serde::{Deserialize, Serialize};
+use std::io::Write;
 
 pub fn deserialize_abstract_geometry_property(
     xml_document: &[u8],
-    spans: &XmlElementSpans<GmlElement>,
+    index: &XmlDocumentIndex<GmlElement>,
+    config: &DeserializationConfig,
 ) -> Result<AbstractGeometryProperty, Error> {
-    let parsed: GmlAbstractGeometryProperty = de::from_reader(xml_document)?;
+    let index = if index.is_truncated() {
+        &XmlDocumentIndex::from_scan(xml_document, config.rescan_depth())?
+    } else {
+        index
+    };
+    let (association, ownership) = deserialize_association_and_ownership_attributes(xml_document)?;
 
-    let object = deserialize_abstract_geometry_kind(xml_document, spans)?;
+    let object = deserialize_abstract_geometry_kind(xml_document, index, config)?;
 
     Ok(AbstractGeometryProperty::new(
         object,
-        parsed.association.try_into()?,
-        parsed.ownership.into(),
+        association,
+        ownership,
     ))
 }
 
-pub fn serialize_abstract_geometry_property(
+pub fn serialize_abstract_geometry_property<N: XmlNamespace, E: XmlElement, W: Write>(
     abstract_geometry_property: &AbstractGeometryProperty,
-    formatting: Formatting,
-    target_xml_element: &'static str,
-) -> Result<XmlNode, Error> {
-    let mut xml_node_parts = XmlNodeParts::empty();
+    xml_fragment_writer: &mut XmlFragmentWriter<W>,
+    target_xml_namespace: N,
+    target_xml_element: E,
+) -> Result<(), Error> {
+    let attributes = serialize_association_and_ownership_attributes(
+        abstract_geometry_property.association(),
+        abstract_geometry_property.ownership(),
+    );
 
-    xml_node_parts
-        .attributes
-        .extend(serialize_association_attributes(
-            abstract_geometry_property.association(),
-        ));
-    xml_node_parts
-        .attributes
-        .extend(serialize_ownership_attributes(
-            abstract_geometry_property.ownership(),
-        ));
-
-    if let Some(object) = abstract_geometry_property.object() {
-        xml_node_parts
-            .content
-            .push(XmlNodeContent::Child(serialize_abstract_geometry_kind(
-                object, formatting,
-            )?));
+    match abstract_geometry_property.object() {
+        Some(object) => {
+            xml_fragment_writer.write_start_event_with_attributes(
+                target_xml_namespace,
+                target_xml_element,
+                attributes,
+            )?;
+            serialize_abstract_geometry_kind(object, xml_fragment_writer)?;
+            xml_fragment_writer.write_end_event(target_xml_namespace, target_xml_element)?;
+        }
+        None => {
+            xml_fragment_writer.write_empty_element_with_attributes(
+                target_xml_namespace,
+                target_xml_element,
+                attributes,
+            )?;
+        }
     }
 
-    Ok(XmlNode::new(target_xml_element, xml_node_parts))
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-pub struct GmlAbstractGeometryProperty {
-    #[serde(flatten)]
-    pub association: GmlAssociationAttributes,
-    #[serde(flatten)]
-    pub ownership: GmlOwnershipAttributes,
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{deserialize_abstract_geometry_property, serialize_abstract_geometry_property};
-    use crate::util::{Formatting, GmlElement, extract_xml_element_spans};
+    use crate::util::{Formatting, GmlElement, GmlNamespace, XmlDocumentIndex, XmlFragmentWriter};
     use egml_core::model::base::{HasAssociationAttributes, HasOwnershipAttributes};
     use egml_core::model::geometry::AbstractGeometryProperty;
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::aggregates::{AbstractGeometricAggregateKind, MultiPoint};
     use egml_core::model::geometry::primitives::{
-        AbstractGeometricPrimitiveKind, AbstractRingKind, AbstractRingProperty,
-        AbstractSurfaceKind, LinearRing, Point, PointProperty, Polygon,
+        AbstractGeometricPrimitiveKind, AbstractRingKind, AbstractSurfaceKind, LinearRing, Point,
+        PointProperty, Polygon,
     };
     use egml_core::model::xlink::{ActuateType, HRef, ShowType};
 
@@ -85,7 +89,7 @@ mod tests {
             DirectPosition::new(0.0, 1.0, 0.0).unwrap(),
         ];
         let ring = AbstractRingKind::LinearRing(LinearRing::new(points).unwrap());
-        let polygon = Polygon::new(Some(AbstractRingProperty::from_object(ring)), []).unwrap();
+        let polygon = Polygon::new(Some(ring), []).unwrap();
         use egml_core::model::geometry::AbstractGeometryKind;
         use egml_core::model::geometry::primitives::AbstractGeometricPrimitiveKind;
         AbstractGeometryProperty::from_object(AbstractGeometryKind::AbstractGeometricPrimitiveKind(
@@ -114,8 +118,13 @@ mod tests {
             </gml:LinearRing></gml:exterior></gml:Polygon>\
             </gml:geometryMember>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let property = deserialize_abstract_geometry_property(xml, &spans).unwrap();
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let property = deserialize_abstract_geometry_property(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap();
 
         assert!(matches!(
             property.object(),
@@ -137,8 +146,13 @@ mod tests {
             </gml:MultiPoint>\
             </gml:geometryMember>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let property = deserialize_abstract_geometry_property(xml, &spans).unwrap();
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let property = deserialize_abstract_geometry_property(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap();
 
         assert!(matches!(
             property.object(),
@@ -154,8 +168,13 @@ mod tests {
     fn deserialize_with_xlink() {
         let xml = b"<gml:geometryMember xlink:href=\"#some-id\"/>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let property = deserialize_abstract_geometry_property(xml, &spans).unwrap();
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let property = deserialize_abstract_geometry_property(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap();
 
         assert_eq!(property.href(), Some(&HRef::from_local("some-id")));
         assert!(property.object().is_none());
@@ -164,13 +183,15 @@ mod tests {
     #[test]
     fn serialize_polygon_property() {
         let property = make_polygon_property();
-        let xml_node = serialize_abstract_geometry_property(
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometry_property(
             &property,
-            Formatting::Compact,
-            GmlElement::Polygon.into(),
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::Polygon,
         )
         .unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert!(xml.contains("<gml:Polygon"));
         assert!(xml.contains("<gml:exterior"));
@@ -180,13 +201,15 @@ mod tests {
     #[test]
     fn serialize_multi_point_property() {
         let property = make_multi_point_property();
-        let xml_node = serialize_abstract_geometry_property(
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometry_property(
             &property,
-            Formatting::Compact,
-            GmlElement::MultiPoint.into(),
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::MultiPoint,
         )
         .unwrap();
-        let xml = xml_node.to_string(Formatting::Compact).unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
         assert!(xml.contains("<gml:MultiPoint"));
         assert!(xml.contains("<gml:pointMember"));
@@ -199,8 +222,13 @@ mod tests {
             xlink:role=\"http://example.com/role\" xlink:arcrole=\"http://example.com/arcrole\" \
             xlink:show=\"new\" xlink:actuate=\"onLoad\" gml:owns=\"true\"/>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let property = deserialize_abstract_geometry_property(xml, &spans).unwrap();
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let property = deserialize_abstract_geometry_property(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap();
 
         assert_eq!(property.href(), Some(&HRef::from_local("some-id")));
         assert_eq!(property.title().as_deref(), Some("Some Title"));
@@ -219,18 +247,30 @@ mod tests {
     fn round_trip_href_only_property() {
         let xml = b"<gml:geometryMember xlink:href=\"#some-id\"/>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let property = deserialize_abstract_geometry_property(xml, &spans).unwrap();
-        let xml_node = serialize_abstract_geometry_property(
-            &property,
-            Formatting::Compact,
-            GmlElement::Polygon.into(),
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let property = deserialize_abstract_geometry_property(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
         )
         .unwrap();
-        let output = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometry_property(
+            &property,
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::Polygon,
+        )
+        .unwrap();
+        let output = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
-        let spans2 = extract_xml_element_spans(output.as_bytes()).unwrap();
-        let recovered = deserialize_abstract_geometry_property(output.as_bytes(), &spans2).unwrap();
+        let spans2 = XmlDocumentIndex::from_scan(output.as_bytes(), None).unwrap();
+        let recovered = deserialize_abstract_geometry_property(
+            output.as_bytes(),
+            &spans2,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap();
 
         assert_eq!(recovered.association(), property.association());
         assert_eq!(recovered.ownership(), property.ownership());
@@ -242,18 +282,30 @@ mod tests {
             xlink:role=\"http://example.com/role\" xlink:arcrole=\"http://example.com/arcrole\" \
             xlink:show=\"new\" xlink:actuate=\"onLoad\" gml:owns=\"true\"/>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let property = deserialize_abstract_geometry_property(xml, &spans).unwrap();
-        let xml_node = serialize_abstract_geometry_property(
-            &property,
-            Formatting::Compact,
-            GmlElement::Polygon.into(),
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let property = deserialize_abstract_geometry_property(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
         )
         .unwrap();
-        let output = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometry_property(
+            &property,
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::Polygon,
+        )
+        .unwrap();
+        let output = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
 
-        let spans2 = extract_xml_element_spans(output.as_bytes()).unwrap();
-        let recovered = deserialize_abstract_geometry_property(output.as_bytes(), &spans2).unwrap();
+        let spans2 = XmlDocumentIndex::from_scan(output.as_bytes(), None).unwrap();
+        let recovered = deserialize_abstract_geometry_property(
+            output.as_bytes(),
+            &spans2,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap();
 
         assert_eq!(
             recovered.association(),
@@ -275,20 +327,31 @@ mod tests {
             </gml:LinearRing></gml:exterior></gml:Polygon>\
             </gml:geometryMember>";
 
-        let spans = extract_xml_element_spans(xml).unwrap();
-        let property = deserialize_abstract_geometry_property(xml, &spans).unwrap();
-        let xml_node = serialize_abstract_geometry_property(
-            &property,
-            Formatting::Compact,
-            GmlElement::Polygon.into(),
+        let index = XmlDocumentIndex::from_scan(xml, None).unwrap();
+        let property = deserialize_abstract_geometry_property(
+            xml,
+            &index,
+            &crate::util::DeserializationConfig::default(),
         )
         .unwrap();
-        let output = xml_node.to_string(Formatting::Compact).unwrap();
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometry_property(
+            &property,
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::Polygon,
+        )
+        .unwrap();
+        let output = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
         let wrapper = format!("<gml:geometryMember>{output}</gml:geometryMember>");
 
-        let spans2 = extract_xml_element_spans(wrapper.as_bytes()).unwrap();
-        let recovered =
-            deserialize_abstract_geometry_property(wrapper.as_bytes(), &spans2).unwrap();
+        let spans2 = XmlDocumentIndex::from_scan(wrapper.as_bytes(), None).unwrap();
+        let recovered = deserialize_abstract_geometry_property(
+            wrapper.as_bytes(),
+            &spans2,
+            &crate::util::DeserializationConfig::default(),
+        )
+        .unwrap();
 
         assert!(matches!(
             recovered.object(),
@@ -300,5 +363,22 @@ mod tests {
                 )
             )
         ));
+    }
+
+    #[test]
+    fn serialize_href_only_property_writes_self_closed_tag() {
+        let property = AbstractGeometryProperty::from_href(HRef::from_local("some-id"));
+
+        let mut xml_fragment_writer = XmlFragmentWriter::new_in_memory(Formatting::Compact);
+        serialize_abstract_geometry_property(
+            &property,
+            &mut xml_fragment_writer,
+            GmlNamespace::Gml,
+            GmlElement::Polygon,
+        )
+        .unwrap();
+        let xml = String::from_utf8(xml_fragment_writer.into_bytes()).unwrap();
+
+        assert_eq!(xml, r##"<gml:Polygon xlink:href="#some-id"/>"##);
     }
 }

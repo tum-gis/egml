@@ -117,7 +117,7 @@ impl AbstractSurfaceKind {
         match self {
             AbstractSurfaceKind::CompositeSurface(x) => x.area_3d(),
             AbstractSurfaceKind::Polygon(x) => x.area_3d(),
-            AbstractSurfaceKind::Shell(_x) => todo!("needs to be implemented for shells"),
+            AbstractSurfaceKind::Shell(x) => x.area_3d(),
             AbstractSurfaceKind::Surface(x) => x.area_3d(),
             AbstractSurfaceKind::SurfaceKind(x) => x.area_3d(),
         }

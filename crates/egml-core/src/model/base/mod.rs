@@ -9,21 +9,27 @@
 //! | [`AbstractGml`] | Base data shared by every GML object |
 //! | [`Id`] | Stable, globally unique GML object identifier |
 //! | [`Reference`] | A by-reference-only property (`gml:ReferenceType`) |
+//! | [`Property`] | A single-object property, inline or by reference |
+//! | [`ArrayProperty`] | An array property of inline objects |
 
 mod abstract_gml;
 mod abstract_gml_kind;
+mod array_property;
 mod association_attributes;
 mod association_attributes_access;
 mod id;
 mod ownership_attributes;
 mod ownership_attributes_access;
+mod property;
 mod reference;
 
 pub use abstract_gml::*;
 pub use abstract_gml_kind::*;
+pub use array_property::*;
 pub use association_attributes::*;
 pub use association_attributes_access::*;
 pub use id::*;
 pub use ownership_attributes::*;
 pub use ownership_attributes_access::*;
+pub use property::*;
 pub use reference::*;

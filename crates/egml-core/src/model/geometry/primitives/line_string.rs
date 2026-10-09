@@ -13,7 +13,9 @@ use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector3};
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LineString {
     pub abstract_curve: AbstractCurve,
-    points: Vec<DirectPosition>,
+    /// Boxed slice rather than `Vec`: points are written once and then only
+    /// read or transformed in place, so the capacity field would be dead weight.
+    points: Box<[DirectPosition]>,
 }
 
 impl LineString {
@@ -29,7 +31,7 @@ impl LineString {
 
         Ok(Self {
             abstract_curve: AbstractCurve::default(),
-            points,
+            points: points.into_boxed_slice(),
         })
     }
 
@@ -42,7 +44,7 @@ impl LineString {
 
         Ok(Self {
             abstract_curve,
-            points,
+            points: points.into_boxed_slice(),
         })
     }
 
@@ -83,7 +85,7 @@ impl LineString {
     ) -> Result<(), Error> {
         let points: Vec<DirectPosition> = points.into_iter().collect();
         Self::validate(&points)?;
-        self.points = points;
+        self.points = points.into_boxed_slice();
         Ok(())
     }
 }
