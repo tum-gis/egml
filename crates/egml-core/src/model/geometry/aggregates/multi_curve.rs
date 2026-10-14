@@ -14,7 +14,7 @@ use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector3};
 use rayon::iter::IntoParallelRefMutIterator;
 use rayon::iter::ParallelIterator;
 
-/// An unordered collection of [`CurveKind`] members.
+/// An unordered collection of [`AbstractCurveKind`](crate::model::geometry::primitives::AbstractCurveKind) members.
 ///
 /// Corresponds to `gml:MultiCurve` in [OGC 07-036 §11.3.3.1](https://docs.ogc.org/is/07-036/07-036.pdf).
 #[derive(Debug, Clone, PartialEq)]

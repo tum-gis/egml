@@ -17,7 +17,7 @@ use crate::{
 use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector3};
 use rayon::prelude::*;
 
-/// An unordered collection of [`SurfaceKind`] members.
+/// An unordered collection of [`SurfaceKind`](crate::model::geometry::primitives::SurfaceKind) members.
 ///
 /// Corresponds to `gml:MultiSurface` in [OGC 07-036 §11.3.4.1](https://docs.ogc.org/is/07-036/07-036.pdf).
 #[derive(Debug, Clone, PartialEq)]
@@ -130,7 +130,7 @@ impl MultiSurface {
     ///
     /// Returns [`Error::UnresolvedSurfaceReference`] if any member carries only an
     /// xlink:href that has not been resolved into an inline object.
-    /// Propagates any error from [`SurfaceKind::area_3d`].
+    /// Propagates any error from [`SurfaceKind::area_3d`](crate::model::geometry::primitives::SurfaceKind::area_3d).
     pub fn area_3d(&self) -> Result<f64, Error> {
         self.surface_member
             .iter()

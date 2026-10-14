@@ -277,12 +277,24 @@ mod test {
     #[test]
     fn linear_ring_construction_test() {
         let points = vec![
-            DirectPosition::new(601.92791444745251, 1130.4631113024607, 9.0130903915382347)
-                .unwrap(),
-            DirectPosition::new(601.92791832847342, 1130.4631032795705, 9.0130907233102739)
-                .unwrap(),
-            DirectPosition::new(601.92791832847342, 1130.4631032795705, 9.0130907233102739)
-                .unwrap(),
+            DirectPosition::new(
+                601.927_914_447_452_5,
+                1130.4631113024607,
+                9.013_090_391_538_235,
+            )
+            .unwrap(),
+            DirectPosition::new(
+                601.927_918_328_473_4,
+                1130.4631032795705,
+                9.013_090_723_310_274,
+            )
+            .unwrap(),
+            DirectPosition::new(
+                601.927_918_328_473_4,
+                1130.4631032795705,
+                9.013_090_723_310_274,
+            )
+            .unwrap(),
         ];
         let result = LinearRing::new(points);
 

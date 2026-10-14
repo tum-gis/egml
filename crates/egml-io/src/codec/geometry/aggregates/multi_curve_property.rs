@@ -212,12 +212,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(property.href(), Some(&HRef::from_local("some-id")));
-        assert_eq!(property.title().as_deref(), Some("Some Title"));
-        assert_eq!(property.role().as_deref(), Some("http://example.com/role"));
-        assert_eq!(
-            property.arcrole().as_deref(),
-            Some("http://example.com/arcrole")
-        );
+        assert_eq!(property.title(), Some("Some Title"));
+        assert_eq!(property.role(), Some("http://example.com/role"));
+        assert_eq!(property.arcrole(), Some("http://example.com/arcrole"));
         assert_eq!(property.show(), Some(&ShowType::New));
         assert_eq!(property.actuate(), Some(&ActuateType::OnLoad));
         assert!(property.owns());

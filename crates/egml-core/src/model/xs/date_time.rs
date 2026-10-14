@@ -81,8 +81,10 @@ impl DateTime {
     ///
     /// assert!(DateTime::from_parts(2020, 2, 30, 0, 0, 0, 0, 0).is_err());
     /// ```
-    // The flat signature lets language bindings map this method one to one.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the flat signature lets language bindings map this method one to one"
+    )]
     pub fn from_parts(
         year: i32,
         month: u32,

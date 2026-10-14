@@ -5,7 +5,7 @@ use crate::model::geometry::primitives::{
 ///
 /// A curve is a 1-D geometric primitive representing a connected series of
 /// coordinate positions.  The only concrete curve type currently implemented
-/// is [`LineString`].
+/// is [`LineString`](crate::model::geometry::primitives::LineString).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AbstractCurve {
     pub abstract_geometric_primitive: AbstractGeometricPrimitive,

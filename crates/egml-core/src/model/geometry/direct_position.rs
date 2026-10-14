@@ -273,9 +273,9 @@ impl From<parry3d_f64::math::Vector> for DirectPosition {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+
     use crate::model::geometry::DirectPosition;
-    use approx::relative_eq;
+    use approx::assert_relative_eq;
     use nalgebra::{Isometry3, Rotation3, Vector3};
     use std::f64::consts::FRAC_PI_2;
 
@@ -318,8 +318,8 @@ mod tests {
 
         position.apply_transform(nalgebra::convert(isometry));
 
-        relative_eq!(position.x(), -1.0, epsilon = f64::EPSILON);
-        relative_eq!(position.y(), 1.0, epsilon = f64::EPSILON);
-        relative_eq!(position.z(), 0.0, epsilon = f64::EPSILON);
+        assert_relative_eq!(position.x(), -1.0, epsilon = f64::EPSILON);
+        assert_relative_eq!(position.y(), 1.0, epsilon = f64::EPSILON);
+        assert_relative_eq!(position.z(), 0.0, epsilon = f64::EPSILON);
     }
 }

@@ -1,6 +1,6 @@
 //! Re-export façade for the `egml` workspace.
 //!
-//! This crate bundles [`egml-core`], [`egml-io`], and [`egml-transform`] under a
+//! This crate bundles [`egml-core`](egml_core), [`egml-io`](egml_io), and [`egml-transform`](egml_transform) under a
 //! single convenient namespace so downstream users only need one dependency.
 //!
 //! | Re-export path | Source crate | Purpose |

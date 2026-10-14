@@ -155,7 +155,7 @@ impl<W: Write> XmlFragmentWriter<W> {
         Ok(())
     }
 
-    pub fn write_leaf_element<'a, N: XmlNamespace, E: XmlElement>(
+    pub fn write_leaf_element<N: XmlNamespace, E: XmlElement>(
         &mut self,
         namespace: N,
         element: E,

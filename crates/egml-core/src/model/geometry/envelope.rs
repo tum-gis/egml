@@ -206,7 +206,10 @@ impl Envelope {
     }
 
     /// Returns `true` if exactly one axis has non-zero extent (a line segment).
-    #[allow(clippy::nonminimal_bool)]
+    #[expect(
+        clippy::nonminimal_bool,
+        reason = "listing each axis combination reads clearer than the minimized form"
+    )]
     pub fn is_linear(&self) -> bool {
         let nx = self.size_x() > 0.0;
         let ny = self.size_y() > 0.0;
@@ -215,7 +218,10 @@ impl Envelope {
     }
 
     /// Returns `true` if exactly two axes have non-zero extent (a flat rectangle).
-    #[allow(clippy::nonminimal_bool)]
+    #[expect(
+        clippy::nonminimal_bool,
+        reason = "listing each axis combination reads clearer than the minimized form"
+    )]
     pub fn is_surface(&self) -> bool {
         let nx = self.size_x() > 0.0;
         let ny = self.size_y() > 0.0;
@@ -721,7 +727,7 @@ mod tests {
     #[test]
     fn from_envelopes_single_returns_same_envelope() {
         let e = env(1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
-        let result = Envelope::from_envelopes(&[e.clone()]).unwrap();
+        let result = Envelope::from_envelopes(std::slice::from_ref(&e)).unwrap();
 
         assert_eq!(result, e);
     }

@@ -23,6 +23,10 @@ impl<Elem: XmlElement> XmlElementSpans<Elem> {
     /// Used to bridge element-level bytes into parent-level dispatchers.
     pub fn single(element: Elem, len: usize) -> Self {
         let mut spans = HashMap::new();
+        #[expect(
+            clippy::single_range_in_vec_init,
+            reason = "a list holding one span, not the indices 0..len"
+        )]
         spans.insert(element, vec![0..len]);
         Self { spans }
     }

@@ -24,13 +24,6 @@ impl Triangle {
         })
     }
 
-    pub(crate) fn new_unchecked(exterior: AbstractRingKind) -> Self {
-        Self {
-            abstract_surface_patch: AbstractSurfacePatch::default(),
-            exterior,
-        }
-    }
-
     pub fn from_abstract_surface_patch(
         abstract_surface_patch: AbstractSurfacePatch,
         exterior: AbstractRingKind,

@@ -135,9 +135,8 @@ fn triangulate_with_holes(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::model::base::{AbstractGml, Id};
-    use crate::model::geometry::primitives::{AsAbstractSurfacePatch, AsSurface};
-    use nalgebra::{Isometry3, Vector3};
+
+    use crate::model::geometry::primitives::AsSurface;
 
     #[test]
     fn triangulate_without_exterior_ring() {
@@ -194,11 +193,24 @@ mod test {
     #[test]
     fn linear_ring_test() {
         let linear_ring = LinearRing::new([
-            DirectPosition::new(478.88403143223741, 1137.6732953797839, 3.813234192323872).unwrap(),
-            DirectPosition::new(478.88403145332472, 1137.6732953253052, 3.8132341922655204)
-                .unwrap(),
-            DirectPosition::new(478.88403144458238, 1137.6732953478909, 3.8132341922897117)
-                .unwrap(),
+            DirectPosition::new(
+                478.884_031_432_237_4,
+                1_137.673_295_379_784,
+                3.813234192323872,
+            )
+            .unwrap(),
+            DirectPosition::new(
+                478.884_031_453_324_7,
+                1137.6732953253052,
+                3.8132341922655204,
+            )
+            .unwrap(),
+            DirectPosition::new(
+                478.884_031_444_582_4,
+                1137.6732953478909,
+                3.8132341922897117,
+            )
+            .unwrap(),
         ])
         .unwrap();
 

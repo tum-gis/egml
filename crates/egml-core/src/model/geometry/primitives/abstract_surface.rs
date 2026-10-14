@@ -4,7 +4,7 @@ use crate::model::geometry::primitives::{
 /// Base data shared by all GML surface geometry types ([OGC 07-036 §10.5.1](https://docs.ogc.org/is/07-036/07-036.pdf)).
 ///
 /// A surface is a 2-D geometric primitive.  Concrete surface types include
-/// [`Polygon`], [`Surface`], and [`CompositeSurface`].
+/// [`Polygon`](crate::model::geometry::primitives::Polygon), [`Surface`](crate::model::geometry::primitives::Surface), and [`CompositeSurface`](crate::model::geometry::complexes::CompositeSurface).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct AbstractSurface {
     pub abstract_geometric_primitive: AbstractGeometricPrimitive,

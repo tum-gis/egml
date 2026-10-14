@@ -2,7 +2,7 @@
 //!
 //! `egml-transform` is under active development. Future versions will expose
 //! coordinate-system transforms, affine transformations, and other spatial
-//! operations on the geometry types from [`egml-core`].
+//! operations on the geometry types from [`egml-core`](egml_core).
 //!
 //! # Errors
 //!

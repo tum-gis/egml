@@ -1,25 +1,55 @@
 min_version = "2026.9.0"
 
+[tools]
+rust = { version = "stable", profile = "minimal", components = "rustfmt,clippy", targets = "wasm32-unknown-unknown" }
+
+# --- Entry points ---
+
 [tasks.default]
-run = ['mise run lint', 'mise run build', 'mise run test', 'mise run doc']
+description = "Check, build, test and document the Rust workspace"
+run = [
+	{ task = "check" },
+	{ task = "build" },
+	{ task = "test" },
+	{ task = "doc" },
+]
 
+# --- Code quality ---
 
-[tasks.init-build-environment]
-description = "Set up the build environment"
+[tasks.check]
+description = "Run all read-only checks (formatting, clippy for native and WebAssembly, documentation)"
+depends = ["check:fmt", "check:clippy", "check:wasm", "check:doc"]
+
+[tasks."check:fmt"]
+description = "Check the formatting"
+run = "cargo fmt --all -- --check"
+
+[tasks."check:clippy"]
+description = "Lint the workspace with clippy"
+run = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
+
+[tasks."check:wasm"]
+description = "Lint the workspace with clippy for WebAssembly (covers the cfg(target_arch = \"wasm32\") code)"
+run = "cargo clippy --workspace --all-targets --target wasm32-unknown-unknown -- -D warnings"
+
+[tasks."check:doc"]
+description = "Check the documentation (broken intra-doc links, invalid HTML)"
+env = { RUSTDOCFLAGS = "-D warnings" }
+run = "cargo doc --no-deps --all-features"
+
+[tasks.fix]
+description = "Apply compiler and clippy fixes and format the code (rewrites files; see check for the read-only variant)"
+alias = "lint"
 run = '''
-rustup component add rustfmt clippy
-'''
-
-[tasks.lint]
-description = "Format and lint the project"
-run = '''
-cargo fix --allow-dirty
-cargo clippy --fix --allow-dirty --allow-staged
+cargo fix --workspace --all-targets --all-features --allow-dirty
+cargo clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged
 cargo fmt --all
 '''
 
+# --- Build, test and documentation ---
+
 [tasks.build]
-description = "Compile the project"
+description = "Build the project"
 usage = '''
 flag "-r --release" help="Build artifacts in release mode, with optimizations"
 '''
@@ -33,20 +63,8 @@ fi
 '''
 
 [tasks.test]
-description = "Execute unit and integration tests"
-run = '''
-cargo fmt --all -- --check
-cargo clippy
-cargo test --verbose --all-features
-'''
-
-[tasks.run]
-description = "Run the project"
-run = "cargo run"
-
-[tasks.clean]
-description = "Remove generated artifacts"
-run = "cargo clean"
+description = "Run the unit and integration tests"
+run = "cargo test --workspace --all-features"
 
 [tasks.doc]
 description = "Build the documentation"
@@ -55,13 +73,25 @@ cargo doc --no-deps --all-features
 echo '<meta http-equiv="refresh" content="0; url=egml/index.html">' > target/doc/index.html
 '''
 
-[tasks.serve-doc]
-description = "Start a local webserver with the documentation"
+# --- Run and serve ---
+
+[tasks."run:cli"]
+description = "Run the CLI (arguments are passed through, e.g. mise run run:cli -- --help)"
+run = "cargo run -p egml-cli --"
+
+[tasks."serve:doc"]
+description = "Serve the documentation on a local web server"
 depends = ["doc"]
 tools = { "cargo:miniserve" = "0" }
 run = '''
 miniserve ./target/doc --index index.html
 '''
+
+# --- Maintenance ---
+
+[tasks.clean]
+description = "Remove generated artifacts"
+run = "cargo clean"
 
 [tasks.release]
 description = "Create a new software release and publish it"

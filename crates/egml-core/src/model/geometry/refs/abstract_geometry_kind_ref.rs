@@ -17,9 +17,9 @@ use crate::model::geometry::{AbstractGeometry, AbstractGeometryKind, AsAbstractG
 /// `&'a AbstractGeometryKind` can't represent every node in the tree.
 ///
 /// `From<&Leaf>` and `TryFrom` conversions are generated across the whole
-/// inheritance chain by the [`impl_from_for_abstract_geometry_kind_ref!`],
-/// [`impl_try_from_for_abstract_geometry_kind_ref!`] and
-/// [`impl_try_from_abstract_geometry_kind_ref_for_enum!`] macro families,
+/// inheritance chain by the `impl_from_for_abstract_geometry_kind_ref!`,
+/// `impl_try_from_for_abstract_geometry_kind_ref!` and
+/// `impl_try_from_abstract_geometry_kind_ref_for_enum!` macro families,
 /// invoked once per concrete type at its deepest level.
 #[derive(Debug, Clone, Copy)]
 pub enum AbstractGeometryKindRef<'a> {

@@ -4,7 +4,7 @@ use crate::model::AbstractObject;
 ///
 /// A surface patch is a sub-surface used as a building block inside a
 /// [`Surface`](crate::model::geometry::primitives::Surface).  Concrete
-/// patch types are [`PolygonPatch`] and [`Triangle`].
+/// patch types are [`PolygonPatch`](crate::model::geometry::primitives::PolygonPatch) and [`Triangle`](crate::model::geometry::primitives::Triangle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct AbstractSurfacePatch {
     pub abstract_object: AbstractObject,
