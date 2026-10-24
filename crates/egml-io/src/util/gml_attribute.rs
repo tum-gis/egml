@@ -15,6 +15,8 @@ impl XmlElement for GmlAttribute {
     fn from_local_name(local_name: &str) -> Option<Self> {
         match local_name {
             "id" => Some(Self::Id),
+            "srsDimension" => Some(Self::SrsDimension),
+            "srsName" => Some(Self::SrsName),
             _ => {
                 tracing::debug!("unknown XML element: {local_name}");
                 None

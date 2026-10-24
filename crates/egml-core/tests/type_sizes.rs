@@ -51,7 +51,7 @@ fn property_attributes_cost_one_pointer() {
 
 #[test]
 fn envelope_stays_compact() {
-    // Two corners (48 B) + `Option<Box<str>>` srs_name (16 B) + `Option<u8>` srs_dimension.
+    // Two corners (48 B) + `Option<AnyUri>` srs_name (16 B) + `Option<u8>` srs_dimension.
     assert!(
         size_of::<Envelope>() <= 72,
         "Envelope: {}",
@@ -74,4 +74,20 @@ fn point_sequences_are_boxed_slices() {
         "LineString: {}",
         size_of::<LineString>()
     );
+}
+
+#[test]
+fn any_uri_is_a_thin_string() {
+    use egml_core::model::xs::AnyUri;
+
+    assert!(size_of::<AnyUri>() <= 16, "AnyUri: {}", size_of::<AnyUri>());
+    assert_eq!(size_of::<Option<AnyUri>>(), size_of::<AnyUri>());
+}
+
+#[test]
+fn code_stays_compact() {
+    use egml_core::model::basic_types::Code;
+
+    // `Option<AnyUri>` code_space (16 B) + `String` value (24 B).
+    assert!(size_of::<Code>() <= 40, "Code: {}", size_of::<Code>());
 }

@@ -87,7 +87,7 @@ impl AbstractSurfacePatchKind {
     pub fn points(&self) -> Vec<&DirectPosition> {
         match self {
             AbstractSurfacePatchKind::PolygonPatch(x) => x.points(),
-            AbstractSurfacePatchKind::Triangle(x) => x.points(),
+            AbstractSurfacePatchKind::Triangle(x) => x.points().iter().collect(),
         }
     }
 }

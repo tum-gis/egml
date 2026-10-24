@@ -1,11 +1,11 @@
 use crate::model::common::{
     ApplyTransform, ComputeEnvelope, GeometryType, HasGeometryType, IterGeometries,
 };
-use crate::model::geometry::Envelope;
 use crate::model::geometry::primitives::{
     AbstractCurve, AbstractRingKind, AsAbstractCurve, AsAbstractCurveMut, LineString,
 };
 use crate::model::geometry::refs::AbstractGeometryKindRef;
+use crate::model::geometry::{DirectPosition, Envelope};
 use crate::{impl_abstract_curve_mut_traits, impl_abstract_curve_traits};
 use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector3};
 
@@ -92,10 +92,29 @@ impl_try_from_for_abstract_curve_kind!(LineString);
 impl_try_from_for_abstract_curve_kind!(AbstractRingKind);
 
 impl AbstractCurveKind {
+    /// Returns the ordered positions of this curve.
+    pub fn points(&self) -> &[DirectPosition] {
+        match self {
+            AbstractCurveKind::LineString(x) => x.points(),
+            AbstractCurveKind::AbstractRingKind(x) => x.points(),
+        }
+    }
+
     pub fn length_3d(&self) -> f64 {
         match self {
             AbstractCurveKind::LineString(x) => x.length_3d(),
             AbstractCurveKind::AbstractRingKind(x) => x.length_3d(),
+        }
+    }
+
+    /// Returns the minimum 2D distance between `point` and this curve,
+    /// measured in the XY plane (z coordinates are ignored).
+    ///
+    /// See [`LineString::distance_2d`] and [`AbstractRingKind::distance_2d`].
+    pub fn distance_2d(&self, point: &DirectPosition) -> f64 {
+        match self {
+            AbstractCurveKind::LineString(x) => x.distance_2d(point),
+            AbstractCurveKind::AbstractRingKind(x) => x.distance_2d(point),
         }
     }
 }
@@ -152,5 +171,37 @@ impl ComputeEnvelope for AbstractCurveKind {
             AbstractCurveKind::LineString(x) => x.compute_envelope(),
             AbstractCurveKind::AbstractRingKind(x) => x.compute_envelope(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::geometry::primitives::LinearRing;
+
+    fn pos(x: f64, y: f64, z: f64) -> DirectPosition {
+        DirectPosition::new(x, y, z).unwrap()
+    }
+
+    #[test]
+    fn distance_2d_line_string() {
+        let kind = AbstractCurveKind::LineString(
+            LineString::new([pos(0.0, 0.0, 0.0), pos(10.0, 0.0, 0.0)]).unwrap(),
+        );
+        assert!((kind.distance_2d(&pos(5.0, 3.0, 9.0)) - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn distance_2d_ring() {
+        let ring = LinearRing::new([
+            pos(0.0, 0.0, 0.0),
+            pos(10.0, 0.0, 0.0),
+            pos(10.0, 10.0, 0.0),
+            pos(0.0, 10.0, 0.0),
+        ])
+        .unwrap();
+        let kind = AbstractCurveKind::AbstractRingKind(AbstractRingKind::LinearRing(ring));
+        // Closing edge (0,10)→(0,0).
+        assert!((kind.distance_2d(&pos(-2.0, 5.0, 0.0)) - 2.0).abs() < 1e-10);
     }
 }

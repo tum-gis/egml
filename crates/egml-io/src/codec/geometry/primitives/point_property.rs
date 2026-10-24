@@ -77,6 +77,7 @@ mod tests {
     use egml_core::model::geometry::DirectPosition;
     use egml_core::model::geometry::primitives::{Point, PointProperty};
     use egml_core::model::xlink::{ActuateType, HRef, ShowType};
+    use egml_core::model::xs::AnyUri;
 
     fn make_point_property() -> PointProperty {
         PointProperty::from_object(Point::new(DirectPosition::new(1.0, 2.0, 3.0).unwrap()))
@@ -264,8 +265,14 @@ mod tests {
 
         assert_eq!(property.href(), Some(&HRef::from_local("some-id")));
         assert_eq!(property.title(), Some("Some Title"));
-        assert_eq!(property.role(), Some("http://example.com/role"));
-        assert_eq!(property.arcrole(), Some("http://example.com/arcrole"));
+        assert_eq!(
+            property.role().map(AnyUri::as_str),
+            Some("http://example.com/role")
+        );
+        assert_eq!(
+            property.arcrole().map(AnyUri::as_str),
+            Some("http://example.com/arcrole")
+        );
         assert_eq!(property.show(), Some(&ShowType::New));
         assert_eq!(property.actuate(), Some(&ActuateType::OnLoad));
         assert!(property.owns());

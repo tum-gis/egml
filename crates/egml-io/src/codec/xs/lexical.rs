@@ -1,5 +1,9 @@
-//! Helpers shared by the `xs:date` and `xs:dateTime` codecs for their lexical
-//! forms ([XSD 1.1 Part 2 §D.2](https://www.w3.org/TR/xmlschema11-2/#dt-dt-7PropMod)).
+//! Helpers shared by the XSD datatype codecs for their lexical forms.
+//!
+//! [`collapse_whitespace`] implements the `whiteSpace=collapse` facet
+//! ([XSD 1.1 Part 2 §4.3.6](https://www.w3.org/TR/xmlschema11-2/#rf-whiteSpace)).
+//! The remaining helpers cover the `xs:date` and `xs:dateTime` forms
+//! ([XSD 1.1 Part 2 §D.2](https://www.w3.org/TR/xmlschema11-2/#dt-dt-7PropMod)).
 //!
 //! Date and time fields are parsed by chrono, which is more lenient than XSD
 //! (e.g. it accepts single-digit months) but rejects years with more than four
@@ -18,6 +22,16 @@ pub(super) fn invalid_lexical_value(datatype: &'static str, lexical: &str) -> Er
         datatype,
         value: lexical.to_owned(),
     }
+}
+
+/// Applies the `whiteSpace=collapse` facet: trims the value and replaces
+/// each run of XML whitespace (space, tab, CR, LF) with a single space.
+pub(crate) fn collapse_whitespace(lexical: &str) -> String {
+    lexical
+        .split([' ', '\t', '\r', '\n'])
+        .filter(|x| !x.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Splits a trailing timezone (`Z` or `±hh:mm`) off a lexical value.
@@ -106,6 +120,17 @@ fn parse_fixed_digits(digits: &str, width: usize) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_collapse_whitespace() {
+        assert_eq!(collapse_whitespace("http://a.org/x"), "http://a.org/x");
+        assert_eq!(collapse_whitespace("  http://a.org/x \n"), "http://a.org/x");
+        assert_eq!(collapse_whitespace("a \t\r\n  b c"), "a b c");
+        assert_eq!(collapse_whitespace(" \t\n "), "");
+        assert_eq!(collapse_whitespace(""), "");
+        // Only XML whitespace is collapsed, not other Unicode spaces.
+        assert_eq!(collapse_whitespace("a\u{00A0}b"), "a\u{00A0}b");
+    }
 
     #[test]
     fn test_split_timezone() {

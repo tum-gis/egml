@@ -1,6 +1,7 @@
 use crate::model::base::AssociationAttributes;
 use crate::model::basic_types::NilReason;
 use crate::model::xlink::{ActuateType, HRef, ShowType};
+use crate::model::xs::AnyUri;
 
 /// Read-only access to the `gml:AssociationAttributeGroup` on a property element.
 pub trait HasAssociationAttributes {
@@ -27,13 +28,13 @@ pub trait HasAssociationAttributes {
     }
 
     /// `xlink:role` — URI identifying the semantic role of the linked resource.
-    fn role(&self) -> Option<&str> {
-        self.association().role.as_deref()
+    fn role(&self) -> Option<&AnyUri> {
+        self.association().role.as_ref()
     }
 
     /// `xlink:arcrole` — URI identifying the role of the link arc.
-    fn arcrole(&self) -> Option<&str> {
-        self.association().arcrole.as_deref()
+    fn arcrole(&self) -> Option<&AnyUri> {
+        self.association().arcrole.as_ref()
     }
 
     /// `xlink:show` — how the linked resource should be presented on traversal.
@@ -97,12 +98,12 @@ pub trait HasAssociationAttributesMut: HasAssociationAttributes {
     }
 
     /// Sets `xlink:role`.
-    fn set_role(&mut self, role: impl Into<String>) {
+    fn set_role(&mut self, role: impl Into<AnyUri>) {
         self.association_mut().role = Some(role.into());
     }
 
     /// Sets or clears `xlink:role`.
-    fn set_role_opt(&mut self, role: Option<String>) {
+    fn set_role_opt(&mut self, role: Option<AnyUri>) {
         self.association_mut().role = role;
     }
 
@@ -112,12 +113,12 @@ pub trait HasAssociationAttributesMut: HasAssociationAttributes {
     }
 
     /// Sets `xlink:arcrole`.
-    fn set_arcrole(&mut self, arcrole: impl Into<String>) {
+    fn set_arcrole(&mut self, arcrole: impl Into<AnyUri>) {
         self.association_mut().arcrole = Some(arcrole.into());
     }
 
     /// Sets or clears `xlink:arcrole`.
-    fn set_arcrole_opt(&mut self, arcrole: Option<String>) {
+    fn set_arcrole_opt(&mut self, arcrole: Option<AnyUri>) {
         self.association_mut().arcrole = arcrole;
     }
 

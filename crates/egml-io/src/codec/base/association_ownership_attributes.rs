@@ -1,4 +1,5 @@
 use crate::Error;
+use crate::codec::xs::any_uri_from_lexical;
 use egml_core::model::base::{AssociationAttributes, OwnershipAttributes};
 use egml_core::model::xlink::{ActuateType, HRef, ShowType};
 use quick_xml::events::Event;
@@ -29,10 +30,10 @@ pub fn deserialize_association_and_ownership_attributes(
                     let attr = attr.map_err(quick_xml::Error::from)?;
                     let value = attr.normalized_value(XmlVersion::Implicit1_0)?.into_owned();
                     match attr.key.local_name().as_ref() {
-                        "href" => association.href = Some(HRef::from(value)),
+                        "href" => association.href = Some(HRef::from(any_uri_from_lexical(&value))),
                         "title" => association.title = Some(value),
-                        "role" => association.role = Some(value),
-                        "arcrole" => association.arcrole = Some(value),
+                        "role" => association.role = Some(any_uri_from_lexical(&value)),
+                        "arcrole" => association.arcrole = Some(any_uri_from_lexical(&value)),
                         "show" => {
                             let show = value.parse::<ShowType>().map_err(|_| {
                                 egml_core::Error::InvalidAttributeValue {
@@ -95,10 +96,10 @@ pub fn serialize_association_and_ownership_attributes(
         attributes.push(("xlink:title".to_string(), title.clone()));
     }
     if let Some(role) = &association.role {
-        attributes.push(("xlink:role".to_string(), role.clone()));
+        attributes.push(("xlink:role".to_string(), role.to_string()));
     }
     if let Some(arcrole) = &association.arcrole {
-        attributes.push(("xlink:arcrole".to_string(), arcrole.clone()));
+        attributes.push(("xlink:arcrole".to_string(), arcrole.to_string()));
     }
     if let Some(show) = &association.show {
         attributes.push(("xlink:show".to_string(), show.to_string()));
@@ -136,6 +137,7 @@ mod tests {
     };
     use egml_core::model::base::{AssociationAttributes, OwnershipAttributes};
     use egml_core::model::xlink::{ActuateType, HRef, ShowType};
+    use egml_core::model::xs::AnyUri;
 
     #[test]
     fn deserializes_local_href_and_owns() {
@@ -174,10 +176,40 @@ mod tests {
         let (association, _) = deserialize_association_and_ownership_attributes(xml).unwrap();
 
         assert_eq!(association.title, Some("Some Title".to_string()));
-        assert_eq!(association.role, Some("urn:role".to_string()));
-        assert_eq!(association.arcrole, Some("urn:arcrole".to_string()));
+        assert_eq!(association.role, Some(AnyUri::new("urn:role")));
+        assert_eq!(association.arcrole, Some(AnyUri::new("urn:arcrole")));
         assert_eq!(association.show, Some(ShowType::New));
         assert_eq!(association.actuate, Some(ActuateType::OnLoad));
+    }
+
+    #[test]
+    fn collapses_role_and_arcrole_whitespace() {
+        let xml = br#"<con:relatedTo
+            xlink:title="  Some  Title "
+            xlink:role=" urn:role "
+            xlink:arcrole="urn:arc  role"/>"#;
+
+        let (association, _) = deserialize_association_and_ownership_attributes(xml).unwrap();
+
+        assert_eq!(association.role, Some(AnyUri::new("urn:role")));
+        assert_eq!(association.arcrole, Some(AnyUri::new("urn:arc role")));
+        // `xlink:title` is a plain string, so its whitespace is kept.
+        assert_eq!(association.title, Some("  Some  Title ".to_string()));
+    }
+
+    #[test]
+    fn collapses_href_whitespace() {
+        let remote = br#"<con:relatedTo xlink:href="  https://example.com/feature/1 "/>"#;
+        let local = br#"<con:relatedTo xlink:href=" #UUID_abc "/>"#;
+
+        let (remote, _) = deserialize_association_and_ownership_attributes(remote).unwrap();
+        let (local, _) = deserialize_association_and_ownership_attributes(local).unwrap();
+
+        assert_eq!(
+            remote.href,
+            Some(HRef::Remote(AnyUri::new("https://example.com/feature/1")))
+        );
+        assert_eq!(local.href, Some(HRef::from_local("UUID_abc")));
     }
 
     #[test]
@@ -298,8 +330,8 @@ mod tests {
         let association = AssociationAttributes {
             href: Some(HRef::from_local("some-id")),
             title: Some("Some Title".to_string()),
-            role: Some("http://example.com/role".to_string()),
-            arcrole: Some("http://example.com/arcrole".to_string()),
+            role: Some(AnyUri::new("http://example.com/role")),
+            arcrole: Some(AnyUri::new("http://example.com/arcrole")),
             show: Some(ShowType::New),
             actuate: Some(ActuateType::OnLoad),
             nil_reason: None,
@@ -343,8 +375,8 @@ mod tests {
         let association = AssociationAttributes {
             href: Some(HRef::from_remote("https://example.com/feature/1")),
             title: Some("Some Title".to_string()),
-            role: Some("urn:role".to_string()),
-            arcrole: Some("urn:arcrole".to_string()),
+            role: Some(AnyUri::new("urn:role")),
+            arcrole: Some(AnyUri::new("urn:arcrole")),
             show: Some(ShowType::New),
             actuate: Some(ActuateType::OnLoad),
             nil_reason: None,

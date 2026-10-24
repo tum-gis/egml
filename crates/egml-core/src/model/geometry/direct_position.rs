@@ -128,12 +128,12 @@ impl DirectPosition {
         Ok(())
     }
 
-    /// Returns a single-element list containing a reference to `self`.
+    /// Returns a single-element slice containing `self`.
     ///
     /// This method exists so that `DirectPosition` satisfies the same
     /// point-iteration pattern used by multi-point geometry types.
-    pub fn points(&self) -> Vec<&DirectPosition> {
-        vec![self]
+    pub fn points(&self) -> &[DirectPosition] {
+        std::slice::from_ref(self)
     }
 }
 

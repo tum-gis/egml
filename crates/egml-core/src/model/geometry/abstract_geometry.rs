@@ -1,5 +1,6 @@
 use crate::model::base::{AbstractGml, AsAbstractGml, AsAbstractGmlMut};
 use crate::model::geometry::SrsReferenceGroup;
+use crate::model::xs::AnyUri;
 
 /// Base data shared by all GML geometry types ([OGC 07-036 §10.1.3.1](https://docs.ogc.org/is/07-036/07-036.pdf)).
 ///
@@ -55,7 +56,7 @@ pub trait AsAbstractGeometry: AsAbstractGml {
         self.abstract_geometry().srs_reference_group.as_deref()
     }
 
-    fn srs_name(&self) -> Option<&str> {
+    fn srs_name(&self) -> Option<&AnyUri> {
         self.srs_reference_group()
             .and_then(SrsReferenceGroup::srs_name)
     }
@@ -82,12 +83,12 @@ pub trait AsAbstractGeometryMut: AsAbstractGeometry + AsAbstractGmlMut {
         self.abstract_geometry_mut().srs_reference_group = None;
     }
 
-    fn set_srs_name(&mut self, srs_name: impl Into<String>) {
+    fn set_srs_name(&mut self, srs_name: impl Into<AnyUri>) {
         self.abstract_geometry_mut()
             .update_srs_reference_group(|group| group.set_srs_name(srs_name));
     }
 
-    fn set_srs_name_opt(&mut self, srs_name: Option<String>) {
+    fn set_srs_name_opt(&mut self, srs_name: Option<AnyUri>) {
         self.abstract_geometry_mut()
             .update_srs_reference_group(|group| group.set_srs_name_opt(srs_name));
     }
@@ -174,7 +175,7 @@ mod tests {
         geometry.set_srs_name("EPSG:25832");
         geometry.set_srs_dimension(3);
 
-        assert_eq!(geometry.srs_name(), Some("EPSG:25832"));
+        assert_eq!(geometry.srs_name().map(AnyUri::as_str), Some("EPSG:25832"));
         assert_eq!(geometry.srs_dimension(), Some(3));
     }
 

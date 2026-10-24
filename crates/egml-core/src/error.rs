@@ -77,6 +77,12 @@ pub enum Error {
         upper: f64,
     },
 
+    /// Returned when [`Envelope::enlarge`](crate::model::geometry::Envelope::enlarge)
+    /// is called with a distance that is negative, NaN or infinite.
+    ///
+    /// `value` is the distance that was supplied.
+    InvalidDistance { value: f64 },
+
     /// Returned when
     /// [`Envelope::to_triangulated_surface`](crate::model::geometry::Envelope::to_triangulated_surface)
     /// is called on an envelope that is neither a surface nor a volume.
@@ -224,6 +230,10 @@ impl fmt::Display for Error {
                 f,
                 "envelope lower.{axis}={lower} exceeds upper.{axis}={upper}; \
                  lowerCorner must be ≤ upperCorner in every component (OGC 07-036 §10.1.4.6)"
+            ),
+            Error::InvalidDistance { value } => write!(
+                f,
+                "distance {value} is invalid; must be finite and non-negative"
             ),
             Error::NotSurfaceOrVolume { non_zero_extents } => write!(
                 f,

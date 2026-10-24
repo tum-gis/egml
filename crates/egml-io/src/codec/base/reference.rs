@@ -45,6 +45,7 @@ mod tests {
         OwnershipAttributes, Reference,
     };
     use egml_core::model::xlink::{ActuateType, HRef, ShowType};
+    use egml_core::model::xs::AnyUri;
 
     /// Minimal `tran:predecessor`-shaped fixture, standing in for a future
     /// `CitygmlNamespace`/Transportation-module element type.
@@ -101,8 +102,14 @@ mod tests {
 
         assert_eq!(reference.href(), Some(&HRef::from_local("some-id")));
         assert_eq!(reference.title(), Some("Some Title"));
-        assert_eq!(reference.role(), Some("http://example.com/role"));
-        assert_eq!(reference.arcrole(), Some("http://example.com/arcrole"));
+        assert_eq!(
+            reference.role().map(AnyUri::as_str),
+            Some("http://example.com/role")
+        );
+        assert_eq!(
+            reference.arcrole().map(AnyUri::as_str),
+            Some("http://example.com/arcrole")
+        );
         assert_eq!(reference.show(), Some(&ShowType::New));
         assert_eq!(reference.actuate(), Some(&ActuateType::OnLoad));
         assert!(reference.owns());
@@ -139,8 +146,8 @@ mod tests {
                 href: Some(HRef::from_local("some-id")),
                 nil_reason: None,
                 title: Some("Some Title".to_string()),
-                role: Some("http://example.com/role".to_string()),
-                arcrole: Some("http://example.com/arcrole".to_string()),
+                role: Some(AnyUri::new("http://example.com/role")),
+                arcrole: Some(AnyUri::new("http://example.com/arcrole")),
                 show: Some(ShowType::New),
                 actuate: Some(ActuateType::OnLoad),
             },

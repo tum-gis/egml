@@ -1,6 +1,8 @@
 use crate::Error;
+use crate::codec::xs::any_uri_from_lexical;
 use crate::util::{XmlElement, XmlFragmentWriter, XmlNamespace};
 use egml_core::model::basic_types::Code;
+use egml_core::model::xs::AnyUri;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
 use std::io::Write;
@@ -8,7 +10,7 @@ use std::io::Write;
 pub fn deserialize_code(xml_document: &[u8]) -> Result<Code, Error> {
     let mut reader = Reader::from_reader(xml_document);
 
-    let mut code_space: Option<String> = None;
+    let mut code_space: Option<AnyUri> = None;
 
     loop {
         match reader.read_event()? {
@@ -38,12 +40,12 @@ pub fn deserialize_code(xml_document: &[u8]) -> Result<Code, Error> {
     }
 }
 
-fn read_code_space(start: &BytesStart<'_>) -> Result<Option<String>, Error> {
+fn read_code_space(start: &BytesStart<'_>) -> Result<Option<AnyUri>, Error> {
     for attr in start.attributes() {
         let attr = attr.map_err(quick_xml::Error::from)?;
         if attr.key.local_name().as_ref() == "codeSpace" {
-            let value = attr.normalized_value(XmlVersion::Implicit1_0)?.into_owned();
-            return Ok(Some(value));
+            let value = attr.normalized_value(XmlVersion::Implicit1_0)?;
+            return Ok(Some(any_uri_from_lexical(&value)));
         }
     }
     Ok(None)
@@ -57,7 +59,7 @@ pub fn serialize_code<N: XmlNamespace, E: XmlElement, W: Write>(
 ) -> Result<(), Error> {
     let attributes = code
         .code_space()
-        .map(|code_space| ("codeSpace", code_space));
+        .map(|code_space| ("codeSpace", code_space.as_str()));
 
     xml_fragment_writer.write_leaf_element_with_attributes(
         target_xml_namespace,
@@ -92,12 +94,38 @@ mod tests {
         let code = deserialize_code(xml).expect("should work");
 
         assert_eq!(
-            code.code_space(),
+            code.code_space().map(AnyUri::as_str),
             Some(
                 "http://www.sig3d.org/codelists/citygml/2.0/building/2.0/_AbstractBuilding_class.xml"
             )
         );
         assert_eq!(code.value(), "1000");
+    }
+
+    #[test]
+    fn deserialize_code_collapses_code_space_whitespace() {
+        let xml = b"<bldg:class codeSpace=\"  http://example.org/codes.xml \">1000</bldg:class>";
+
+        let code = deserialize_code(xml).expect("should work");
+
+        assert_eq!(
+            code.code_space().map(AnyUri::as_str),
+            Some("http://example.org/codes.xml")
+        );
+        assert_eq!(code.value(), "1000");
+    }
+
+    #[test]
+    fn deserialize_code_self_closing_keeps_code_space() {
+        let xml = b"<bldg:class codeSpace=\"http://example.org/codes.xml\"/>";
+
+        let code = deserialize_code(xml).expect("should work");
+
+        assert_eq!(
+            code.code_space().map(AnyUri::as_str),
+            Some("http://example.org/codes.xml")
+        );
+        assert_eq!(code.value(), "");
     }
 
     #[test]

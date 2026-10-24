@@ -111,6 +111,16 @@ impl AbstractRingKind {
         }
     }
 
+    /// Returns the minimum 2D distance between `point` and this ring's boundary.
+    ///
+    /// See [`LinearRing::distance_2d`].
+    pub fn distance_2d(&self, point: &DirectPosition) -> f64 {
+        match self {
+            AbstractRingKind::LinearRing(x) => x.distance_2d(point),
+            AbstractRingKind::AbstractRingKind(x) => x.distance_2d(point),
+        }
+    }
+
     /// Consumes this ring kind and returns the underlying [`LinearRing`],
     /// unwrapping any nested [`AbstractRingKind::AbstractRingKind`] layers.
     pub fn into_linear_ring(self) -> LinearRing {
@@ -203,5 +213,23 @@ mod tests {
                 Box::new(AbstractRingKind::LinearRing(unit_square_ring())),
             )));
         assert_eq!(kind.into_linear_ring(), unit_square_ring());
+    }
+
+    #[test]
+    fn distance_2d_delegates_to_linear_ring() {
+        let ring = unit_square_ring();
+        let p = DirectPosition::new(0.5, -2.0, 7.0).unwrap();
+        let kind = AbstractRingKind::LinearRing(ring.clone());
+        assert_eq!(kind.distance_2d(&p), ring.distance_2d(&p));
+        assert!((kind.distance_2d(&p) - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn distance_2d_through_nested_kind() {
+        let p = DirectPosition::new(3.0, 0.5, 0.0).unwrap();
+        let kind = AbstractRingKind::AbstractRingKind(Box::new(AbstractRingKind::LinearRing(
+            unit_square_ring(),
+        )));
+        assert!((kind.distance_2d(&p) - 2.0).abs() < 1e-10);
     }
 }

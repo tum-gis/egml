@@ -111,8 +111,8 @@ impl Triangle {
         parry_triangle.distance_to_local_point(point, false)
     }
 
-    pub fn points(&self) -> Vec<&DirectPosition> {
-        vec![&self.a(), &self.b(), &self.c()]
+    pub fn points(&self) -> &[DirectPosition] {
+        self.exterior.points()
     }
 
     pub fn area(&self) -> f64 {

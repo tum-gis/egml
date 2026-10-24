@@ -1,8 +1,10 @@
 use crate::Error;
 use crate::codec::geometry::direct_position::direct_position_from_start;
 use crate::codec::geometry::serialize_direct_position;
+use crate::codec::xs::any_uri_from_lexical;
 use crate::util::{GmlElement, GmlNamespace, XmlFragmentWriter};
 use egml_core::model::geometry::{DirectPosition, Envelope};
+use egml_core::model::xs::AnyUri;
 use quick_xml::events::Event;
 use quick_xml::{Reader, XmlVersion};
 use std::io::Write;
@@ -20,14 +22,14 @@ pub fn deserialize_envelope(xml_document: &[u8]) -> Result<Envelope, Error> {
         }
     };
 
-    let mut srs_name: Option<String> = None;
+    let mut srs_name: Option<AnyUri> = None;
     let mut srs_dimension: Option<u32> = None;
 
     for attr in start.attributes() {
         let attr = attr.map_err(quick_xml::Error::from)?;
         let value = attr.normalized_value(XmlVersion::Implicit1_0)?.into_owned();
         match attr.key.local_name().as_ref() {
-            "srsName" => srs_name = Some(value),
+            "srsName" => srs_name = Some(any_uri_from_lexical(&value)),
             "srsDimension" => {
                 let dimension =
                     value
@@ -97,7 +99,7 @@ pub fn serialize_envelope<W: Write>(
 ) -> Result<(), Error> {
     let mut attributes = Vec::new();
     if let Some(srs_name) = envelope.srs_name() {
-        attributes.push(("srsName", srs_name));
+        attributes.push(("srsName", srs_name.as_str()));
     }
     let srs_dimension_string = envelope.srs_dimension().map(|d| d.to_string());
     if let Some(srs_dimension_string) = &srs_dimension_string {
@@ -133,6 +135,7 @@ mod tests {
     use crate::Error;
     use crate::util::{Formatting, XmlFragmentWriter};
     use egml_core::model::geometry::{DirectPosition, Envelope};
+    use egml_core::model::xs::AnyUri;
 
     fn make_envelope() -> Envelope {
         let lower = DirectPosition::new(1.0, 2.0, 3.0).unwrap();
@@ -185,6 +188,21 @@ mod tests {
     }
 
     #[test]
+    fn deserialize_envelope_collapses_srs_name_whitespace() {
+        let xml_document = b"<gml:Envelope srsName=\"  urn:ogc:def:crs:EPSG::25832 \">
+                <gml:lowerCorner>0 0 0</gml:lowerCorner>
+                <gml:upperCorner>1 1 1</gml:upperCorner>
+            </gml:Envelope>";
+
+        let envelope = deserialize_envelope(xml_document).expect("should deserialize");
+
+        assert_eq!(
+            envelope.srs_name().map(AnyUri::as_str),
+            Some("urn:ogc:def:crs:EPSG::25832")
+        );
+    }
+
+    #[test]
     fn deserialize_envelope_reads_srs_name_and_dimension() {
         let xml_document =
             br#"<gml:Envelope srsName="urn:ogc:def:crs:EPSG::25832" srsDimension="3">
@@ -193,7 +211,10 @@ mod tests {
 </gml:Envelope>"#;
         let envelope = deserialize_envelope(xml_document).expect("should deserialize");
 
-        assert_eq!(envelope.srs_name(), Some("urn:ogc:def:crs:EPSG::25832"));
+        assert_eq!(
+            envelope.srs_name().map(AnyUri::as_str),
+            Some("urn:ogc:def:crs:EPSG::25832")
+        );
         assert_eq!(envelope.srs_dimension(), Some(3));
     }
 

@@ -80,6 +80,7 @@ mod tests {
         AbstractRingKind, AbstractSurfaceKind, AbstractSurfaceProperty, LinearRing, Polygon,
     };
     use egml_core::model::xlink::{ActuateType, HRef, ShowType};
+    use egml_core::model::xs::AnyUri;
 
     fn make_multi_surface_property() -> MultiSurfaceProperty {
         let points = vec![
@@ -221,8 +222,14 @@ mod tests {
 
         assert_eq!(property.href(), Some(&HRef::from_local("some-id")));
         assert_eq!(property.title(), Some("Some Title"));
-        assert_eq!(property.role(), Some("http://example.com/role"));
-        assert_eq!(property.arcrole(), Some("http://example.com/arcrole"));
+        assert_eq!(
+            property.role().map(AnyUri::as_str),
+            Some("http://example.com/role")
+        );
+        assert_eq!(
+            property.arcrole().map(AnyUri::as_str),
+            Some("http://example.com/arcrole")
+        );
         assert_eq!(property.show(), Some(&ShowType::New));
         assert_eq!(property.actuate(), Some(&ActuateType::OnLoad));
         assert!(property.owns());

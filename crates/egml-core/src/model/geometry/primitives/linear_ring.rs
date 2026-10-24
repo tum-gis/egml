@@ -4,8 +4,9 @@ use crate::model::common::{ApplyTransform, ComputeEnvelope, IterGeometries};
 use crate::model::geometry::primitives::{AbstractRing, AsAbstractRing, AsAbstractRingMut};
 use crate::model::geometry::refs::AbstractGeometryKindRef;
 use crate::model::geometry::{DirectPosition, Envelope};
+use crate::util::distance::point_segment_distance_2d;
 use crate::{impl_abstract_ring_mut_traits, impl_abstract_ring_traits, impl_has_geometry_type};
-use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector3};
+use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector2, Vector3};
 
 const MINIMUM_NUMBER_OF_POINTS: usize = 3;
 
@@ -160,6 +161,24 @@ impl LinearRing {
         }
         cross_sum.norm() * 0.5
     }
+
+    /// Returns the minimum Euclidean distance between `point` and the boundary
+    /// of this ring, measured in the XY plane (z coordinates are ignored).
+    ///
+    /// Includes the implicit closing segment from the last vertex back to the
+    /// first. The ring is treated as a curve, not an area: a point inside the
+    /// ring has a positive distance to its nearest edge.
+    pub fn distance_2d(&self, point: &DirectPosition) -> f64 {
+        let p = Vector2::new(point.x(), point.y());
+        let n = self.points.len();
+        (0..n)
+            .map(|i| {
+                let a = &self.points[i];
+                let b = &self.points[(i + 1) % n];
+                point_segment_distance_2d(p, Vector2::new(a.x(), a.y()), Vector2::new(b.x(), b.y()))
+            })
+            .fold(f64::INFINITY, f64::min)
+    }
 }
 
 impl ApplyTransform for LinearRing {
@@ -208,7 +227,7 @@ impl IterGeometries for LinearRing {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use nalgebra::{Isometry3, Vector3};
 
@@ -325,5 +344,61 @@ mod test {
         linear_ring.apply_isometry(isometry);
 
         assert_eq!(linear_ring, expected_linear_ring);
+    }
+
+    fn pos(x: f64, y: f64, z: f64) -> DirectPosition {
+        DirectPosition::new(x, y, z).unwrap()
+    }
+
+    fn square_ring() -> LinearRing {
+        LinearRing::new([
+            pos(0.0, 0.0, 0.0),
+            pos(10.0, 0.0, 0.0),
+            pos(10.0, 10.0, 0.0),
+            pos(0.0, 10.0, 0.0),
+        ])
+        .unwrap()
+    }
+
+    #[test]
+    fn distance_2d_outside() {
+        assert!((square_ring().distance_2d(&pos(5.0, -3.0, 0.0)) - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn distance_2d_uses_implicit_closing_segment() {
+        // Nearest edge is (0,10)→(0,0), which is only present via wrap-around.
+        assert!((square_ring().distance_2d(&pos(-2.0, 5.0, 0.0)) - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn distance_2d_inside_measures_to_boundary() {
+        // The ring is a curve, not an area: interior points have positive distance.
+        assert!((square_ring().distance_2d(&pos(5.0, 4.0, 0.0)) - 4.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn distance_2d_clamps_to_corner() {
+        assert!((square_ring().distance_2d(&pos(13.0, 14.0, 0.0)) - 5.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn distance_2d_on_boundary_is_zero() {
+        assert!(square_ring().distance_2d(&pos(10.0, 7.0, 0.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn distance_2d_ignores_z_and_vertical_wall_ring() {
+        // A vertical wall ring collapses to a line segment from (0,0) to (10,0) in 2D.
+        let wall = LinearRing::new([
+            pos(0.0, 0.0, 0.0),
+            pos(10.0, 0.0, 0.0),
+            pos(10.0, 0.0, 5.0),
+            pos(0.0, 0.0, 5.0),
+        ])
+        .unwrap();
+        let d = wall.distance_2d(&pos(5.0, 3.0, 100.0));
+        assert!(!d.is_nan());
+        assert!((d - 3.0).abs() < 1e-10);
     }
 }

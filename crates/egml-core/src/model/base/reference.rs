@@ -58,6 +58,7 @@ mod tests {
         HasAssociationAttributes, HasAssociationAttributesMut, HasOwnershipAttributes,
     };
     use crate::model::xlink::HRef;
+    use crate::model::xs::AnyUri;
 
     #[test]
     fn new_sets_href() {
@@ -70,6 +71,27 @@ mod tests {
     fn set_role_updates_association() {
         let mut reference = Reference::new(HRef::from_local("some-id"));
         reference.set_role("http://example.com/role");
-        assert_eq!(reference.role(), Some("http://example.com/role"));
+        assert_eq!(
+            reference.role().map(AnyUri::as_str),
+            Some("http://example.com/role")
+        );
+    }
+
+    #[test]
+    fn role_and_arcrole_accept_any_uri() {
+        let mut reference = Reference::new(HRef::from_local("some-id"));
+
+        reference.set_role(AnyUri::new("urn:role"));
+        reference.set_arcrole(AnyUri::new("urn:arcrole"));
+        assert_eq!(reference.role().map(AnyUri::as_str), Some("urn:role"));
+        assert_eq!(reference.arcrole().map(AnyUri::as_str), Some("urn:arcrole"));
+
+        reference.set_role_opt(None);
+        reference.set_arcrole_opt(Some(AnyUri::new("urn:other")));
+        assert_eq!(reference.role(), None);
+        assert_eq!(reference.arcrole().map(AnyUri::as_str), Some("urn:other"));
+
+        reference.clear_arcrole();
+        assert_eq!(reference.arcrole(), None);
     }
 }

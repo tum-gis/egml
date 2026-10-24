@@ -1,5 +1,6 @@
 use crate::model::basic_types::NilReason;
 use crate::model::xlink::{ActuateType, HRef, ShowType};
+use crate::model::xs::AnyUri;
 
 /// Attributes from `gml:AssociationAttributeGroup`.
 ///
@@ -19,9 +20,9 @@ pub struct AssociationAttributes {
     /// `xlink:title` — human-readable label for the remote resource.
     pub title: Option<String>,
     /// `xlink:role` — URI identifying the semantic role of the remote resource.
-    pub role: Option<String>,
+    pub role: Option<AnyUri>,
     /// `xlink:arcrole` — URI identifying the semantic role of the link arc.
-    pub arcrole: Option<String>,
+    pub arcrole: Option<AnyUri>,
     /// `xlink:show` — desired presentation of the remote resource on traversal.
     pub show: Option<ShowType>,
     /// `xlink:actuate` — timing of link traversal.

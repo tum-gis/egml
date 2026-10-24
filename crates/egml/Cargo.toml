@@ -16,6 +16,6 @@ default = []
 random-id = ["egml-core/random-id"]
 
 [dependencies]
-egml-core = { version = "0.0.2-alpha.7", path = "../egml-core" }
-egml-io = { version = "0.0.2-alpha.7", path = "../egml-io" }
-egml-transform = { version = "0.0.2-alpha.7", path = "../egml-transform" }
+egml-core = { version = "0.0.2-alpha.8", path = "../egml-core" }
+egml-io = { version = "0.0.2-alpha.8", path = "../egml-io" }
+egml-transform = { version = "0.0.2-alpha.8", path = "../egml-transform" }

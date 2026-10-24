@@ -2,10 +2,11 @@ use crate::model::common::{ApplyTransform, ComputeEnvelope, IterGeometries};
 use crate::model::geometry::primitives::{AbstractCurve, AsAbstractCurve, AsAbstractCurveMut};
 use crate::model::geometry::refs::AbstractGeometryKindRef;
 use crate::model::geometry::{DirectPosition, Envelope};
+use crate::util::distance::point_segment_distance_2d;
 use crate::{
     Error, impl_abstract_curve_mut_traits, impl_abstract_curve_traits, impl_has_geometry_type,
 };
-use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector3};
+use nalgebra::{Isometry3, Rotation3, Scale3, Transform3, Vector2, Vector3};
 
 /// An ordered sequence of two or more coordinate positions forming a 1-D curve.
 ///
@@ -118,6 +119,39 @@ impl LineString {
             })
             .sum()
     }
+
+    /// Returns the minimum Euclidean distance between `point` and this line string,
+    /// measured in the XY plane (z coordinates are ignored).
+    ///
+    /// Each segment is treated as bounded, so points beyond an end of the line
+    /// string are measured to the nearest endpoint. Segments whose endpoints
+    /// differ only in z collapse to a single point in 2D and are handled as such.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use egml_core::model::geometry::DirectPosition;
+    /// use egml_core::model::geometry::primitives::LineString;
+    ///
+    /// let ls = LineString::new([
+    ///     DirectPosition::new(0.0, 0.0, 0.0).unwrap(),
+    ///     DirectPosition::new(10.0, 0.0, 0.0).unwrap(),
+    /// ])
+    /// .unwrap();
+    /// let p = DirectPosition::new(5.0, 3.0, 42.0).unwrap();
+    /// assert!((ls.distance_2d(&p) - 3.0).abs() < 1e-10);
+    /// ```
+    pub fn distance_2d(&self, point: &DirectPosition) -> f64 {
+        let p = Vector2::new(point.x(), point.y());
+        self.points
+            .windows(2)
+            .map(|w| {
+                let a = Vector2::new(w[0].x(), w[0].y());
+                let b = Vector2::new(w[1].x(), w[1].y());
+                point_segment_distance_2d(p, a, b)
+            })
+            .fold(f64::INFINITY, f64::min)
+    }
 }
 
 impl ApplyTransform for LineString {
@@ -189,5 +223,57 @@ mod tests {
         .unwrap();
         let expected = 3.0_f64.sqrt();
         assert!((ls.length_3d() - expected).abs() < 1e-10);
+    }
+
+    fn pos(x: f64, y: f64, z: f64) -> DirectPosition {
+        DirectPosition::new(x, y, z).unwrap()
+    }
+
+    #[test]
+    fn distance_2d_projects_onto_segment_interior() {
+        let ls = LineString::new([pos(0.0, 0.0, 0.0), pos(10.0, 0.0, 0.0)]).unwrap();
+        assert!((ls.distance_2d(&pos(5.0, 3.0, 0.0)) - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn distance_2d_clamps_to_endpoint() {
+        // Beyond the end of the segment: distance to (10,0), not to the infinite line.
+        let ls = LineString::new([pos(0.0, 0.0, 0.0), pos(10.0, 0.0, 0.0)]).unwrap();
+        assert!((ls.distance_2d(&pos(13.0, 4.0, 0.0)) - 5.0).abs() < 1e-10);
+        assert!((ls.distance_2d(&pos(-3.0, -4.0, 0.0)) - 5.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn distance_2d_is_zero_on_line() {
+        let ls = LineString::new([pos(0.0, 0.0, 0.0), pos(4.0, 4.0, 0.0)]).unwrap();
+        assert!(ls.distance_2d(&pos(2.0, 2.0, 0.0)).abs() < 1e-10);
+        assert!(ls.distance_2d(&pos(4.0, 4.0, 0.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn distance_2d_takes_minimum_over_segments() {
+        // L-shape; the point is closer to the second segment.
+        let ls = LineString::new([
+            pos(0.0, 0.0, 0.0),
+            pos(10.0, 0.0, 0.0),
+            pos(10.0, 10.0, 0.0),
+        ])
+        .unwrap();
+        assert!((ls.distance_2d(&pos(8.0, 5.0, 0.0)) - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn distance_2d_ignores_z() {
+        let ls = LineString::new([pos(0.0, 0.0, 100.0), pos(10.0, 0.0, -50.0)]).unwrap();
+        assert!((ls.distance_2d(&pos(5.0, 3.0, 1000.0)) - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn distance_2d_handles_vertical_segment() {
+        // Points differ only in z, so the segment collapses to a point in 2D.
+        let ls = LineString::new([pos(1.0, 1.0, 0.0), pos(1.0, 1.0, 5.0)]).unwrap();
+        let d = ls.distance_2d(&pos(4.0, 5.0, 0.0));
+        assert!(!d.is_nan());
+        assert!((d - 5.0).abs() < 1e-10);
     }
 }

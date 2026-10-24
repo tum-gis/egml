@@ -2,6 +2,7 @@ use crate::Error;
 use crate::codec::base::{
     deserialize_abstract_gml, serialize_abstract_gml, serialize_abstract_gml_attributes,
 };
+use crate::codec::xs::any_uri_from_lexical;
 use crate::util::{
     DeserializationConfig, GmlAttribute, GmlElement, XmlDocumentIndex, XmlElement,
     XmlFragmentWriter, deserialize_gml_attributes,
@@ -36,7 +37,9 @@ pub fn deserialize_abstract_geometry(
         .transpose()?;
     abstract_geometry.set_srs_dimension_opt(srs_dimension);
 
-    let srs_name: Option<String> = attributes.get(&GmlAttribute::SrsName).cloned();
+    let srs_name = attributes
+        .get(&GmlAttribute::SrsName)
+        .map(|s| any_uri_from_lexical(s));
     abstract_geometry.set_srs_name_opt(srs_name);
 
     Ok(abstract_geometry)
@@ -69,4 +72,44 @@ pub fn serialize_abstract_geometry_attributes(
     }
 
     attributes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egml_core::model::xs::AnyUri;
+
+    fn deserialize(xml_document: &[u8]) -> AbstractGeometry {
+        let index = XmlDocumentIndex::<GmlElement>::from_scan(xml_document, Some(1)).unwrap();
+        deserialize_abstract_geometry(xml_document, &index, &DeserializationConfig::default())
+            .expect("should deserialize")
+    }
+
+    #[test]
+    fn deserialize_reads_srs_attributes() {
+        let geometry = deserialize(
+            b"<gml:MultiSurface srsName=\"EPSG:25832\" srsDimension=\"3\"></gml:MultiSurface>",
+        );
+
+        assert_eq!(geometry.srs_name().map(AnyUri::as_str), Some("EPSG:25832"));
+        assert_eq!(geometry.srs_dimension(), Some(3));
+    }
+
+    #[test]
+    fn deserialize_collapses_srs_name_whitespace() {
+        let geometry =
+            deserialize(b"<gml:MultiSurface srsName=\" EPSG:25832  \"></gml:MultiSurface>");
+
+        assert_eq!(geometry.srs_name().map(AnyUri::as_str), Some("EPSG:25832"));
+    }
+
+    #[test]
+    fn serialize_attributes_writes_srs_name() {
+        let mut geometry = AbstractGeometry::new();
+        geometry.set_srs_name("EPSG:25832");
+
+        let attributes = serialize_abstract_geometry_attributes(&geometry);
+
+        assert!(attributes.contains(&("srsName".to_string(), "EPSG:25832".to_string())));
+    }
 }

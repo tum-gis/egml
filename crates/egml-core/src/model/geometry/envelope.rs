@@ -7,6 +7,7 @@ use crate::model::geometry::primitives::{
     AbstractSurfaceProperty, LinearRing, Polygon, Solid, TriangulatedSurface,
 };
 use crate::model::geometry::{DirectPosition, SrsReferenceGroup};
+use crate::model::xs::AnyUri;
 use nalgebra::{Isometry3, Point3, Rotation3, Scale3, Transform3, Vector3};
 use std::fmt;
 
@@ -130,7 +131,7 @@ impl Envelope {
 
     /// Returns the SRS name identifying the CRS of this envelope's coordinates,
     /// or `None` if unspecified.
-    pub fn srs_name(&self) -> Option<&str> {
+    pub fn srs_name(&self) -> Option<&AnyUri> {
         self.srs_reference_group.srs_name()
     }
 
@@ -141,12 +142,12 @@ impl Envelope {
     }
 
     /// Sets the SRS name identifying the CRS (e.g. `"urn:ogc:def:crs:EPSG::25832"`).
-    pub fn set_srs_name(&mut self, srs_name: impl Into<String>) {
+    pub fn set_srs_name(&mut self, srs_name: impl Into<AnyUri>) {
         self.srs_reference_group.set_srs_name(srs_name);
     }
 
     /// Sets or clears the SRS name.
-    pub fn set_srs_name_opt(&mut self, srs_name: Option<String>) {
+    pub fn set_srs_name_opt(&mut self, srs_name: Option<AnyUri>) {
         self.srs_reference_group.set_srs_name_opt(srs_name);
     }
 
@@ -290,9 +291,28 @@ impl Envelope {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NonFiniteCoordinate`] if `distance` is NaN or infinite,
-    /// or if the resulting coordinates would overflow `f64::MAX`.
+    /// Returns [`Error::InvalidDistance`] if `distance` is negative, NaN or
+    /// infinite, and [`Error::NonFiniteCoordinate`] if the resulting
+    /// coordinates would overflow `f64::MAX`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use egml_core::model::geometry::{DirectPosition, Envelope};
+    ///
+    /// let lo = DirectPosition::new(0.0, 0.0, 0.0).unwrap();
+    /// let hi = DirectPosition::new(1.0, 1.0, 1.0).unwrap();
+    /// let env = Envelope::new(lo, hi).unwrap();
+    ///
+    /// let enlarged = env.enlarge(0.5).unwrap();
+    /// assert_eq!(enlarged.size_x(), 2.0);
+    /// assert!(env.enlarge(-1.0).is_err());
+    /// ```
     pub fn enlarge(&self, distance: f64) -> Result<Envelope, Error> {
+        if !distance.is_finite() || distance < 0.0 {
+            return Err(Error::InvalidDistance { value: distance });
+        }
+
         let lower_corner = DirectPosition::new(
             self.lower_corner.x() - distance,
             self.lower_corner.y() - distance,
@@ -972,5 +992,43 @@ mod tests {
         let a = env(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
         let b = env(10.0, 10.0, 10.0, 20.0, 20.0, 20.0);
         assert!(a.contains_envelope_partially(&b));
+    }
+
+    #[test]
+    fn enlarge_expands_both_corners() {
+        let envelope = env(0.0, 0.0, 0.0, 1.0, 2.0, 3.0);
+
+        let enlarged = envelope.enlarge(1.0).unwrap();
+
+        assert_eq!(enlarged, env(-1.0, -1.0, -1.0, 2.0, 3.0, 4.0));
+    }
+
+    #[test]
+    fn enlarge_by_zero_returns_equal_envelope() {
+        let envelope = env(0.0, 0.0, 0.0, 1.0, 2.0, 3.0);
+
+        assert_eq!(envelope.enlarge(0.0).unwrap(), envelope);
+    }
+
+    #[test]
+    fn enlarge_rejects_negative_and_non_finite_distances() {
+        let envelope = env(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
+
+        for distance in [-0.1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(matches!(
+                envelope.enlarge(distance),
+                Err(Error::InvalidDistance { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn enlarge_reports_overflow_as_non_finite_coordinate() {
+        let envelope = env(0.0, 0.0, 0.0, f64::MAX, 1.0, 1.0);
+
+        assert!(matches!(
+            envelope.enlarge(f64::MAX),
+            Err(Error::NonFiniteCoordinate { .. })
+        ));
     }
 }

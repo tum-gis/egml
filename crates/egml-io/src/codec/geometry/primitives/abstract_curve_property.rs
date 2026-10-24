@@ -73,6 +73,7 @@ mod tests {
     use egml_core::model::base::{HasAssociationAttributes, HasOwnershipAttributes};
     use egml_core::model::geometry::primitives::{AbstractCurveKind, AbstractCurveProperty};
     use egml_core::model::xlink::{ActuateType, HRef, ShowType};
+    use egml_core::model::xs::AnyUri;
 
     #[test]
     fn deserialize_with_line_string() {
@@ -164,8 +165,14 @@ mod tests {
 
         assert_eq!(property.href(), Some(&HRef::from_local("some-id")));
         assert_eq!(property.title(), Some("Some Title"));
-        assert_eq!(property.role(), Some("http://example.com/role"));
-        assert_eq!(property.arcrole(), Some("http://example.com/arcrole"));
+        assert_eq!(
+            property.role().map(AnyUri::as_str),
+            Some("http://example.com/role")
+        );
+        assert_eq!(
+            property.arcrole().map(AnyUri::as_str),
+            Some("http://example.com/arcrole")
+        );
         assert_eq!(property.show(), Some(&ShowType::New));
         assert_eq!(property.actuate(), Some(&ActuateType::OnLoad));
         assert!(property.owns());
