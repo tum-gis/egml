@@ -3,27 +3,20 @@ name: Release
 # Publishes a release for an existing version tag (vX.Y.Z[-pre]).
 # The version bump, commit and tag are created locally with `mise run release <level>`.
 #
-# Every job is idempotent: re-running the workflow for the same tag skips whatever is already
-# published. Use the manual trigger (Actions → Release → Run workflow, from main) to re-run a
-# tag, e.g. after a failed publish or when GitHub dropped the tag push event.
+# Every job is idempotent: re-running the workflow (Re-run jobs) skips whatever is already published.
 #
 # Publishing to crates.io is opt-in: it only runs when the repository variable CRATES_IO_PUBLISH is
 # 'true' (Settings → Secrets and variables → Actions → Variables), otherwise the job is skipped and
 # the GitHub release is still created. Once enabled, a failed publish fails the workflow.
 #
 # Publish jobs stay in this file, as crates.io trusted publishing is bound to it (release.yml)
-# and the `release` environment. Build jobs for future bindings can live in reusable workflows.
+# and the `release` environment. The checks and tests are those of the CI workflow (ci.yml); build jobs
+# for future bindings can live in reusable workflows.
 
 on:
   push:
     tags:
     - "v*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing tag to (re-)release, e.g. v0.1.0
-        required: true
-        type: string
 
 permissions: {}
 
@@ -33,11 +26,12 @@ defaults:
     shell: bash
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 env:
-  TAG: ${{ inputs.tag || github.ref_name }}
+  # The tag is passed to the scripts as a variable, never interpolated into them
+  TAG: ${{ github.ref_name }}
   MISE_VERSION: 2026.10.4
   CARGO_RELEASE_VERSION: 1.1.7
   CARGO_INCREMENTAL: 0
@@ -88,14 +82,20 @@ jobs:
           echo "::error::Tag '${TAG}' points to a commit that is not on main"
           exit 1
         fi
-    - run: mise run check
-    - run: mise run test
     - name: Package the crates
       run: cargo package --workspace
 
+  # The checks and tests, the same as for every push and pull request
+  ci:
+    name: CI
+    needs: verify
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   publish-crates:
     name: Publish to crates.io
-    needs: verify
+    needs: ci
     if: vars.CRATES_IO_PUBLISH == 'true'
     runs-on: ubuntu-latest
     environment: release
@@ -137,9 +137,9 @@ jobs:
 
   github-release:
     name: Create GitHub release
-    needs: [verify, publish-crates]
+    needs: [verify, ci, publish-crates]
     # Also runs when publish-crates was skipped (CRATES_IO_PUBLISH not enabled), but not when it failed
-    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.publish-crates.result != 'failure' }}
+    if: ${{ !cancelled() && needs.ci.result == 'success' && needs.publish-crates.result != 'failure' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
