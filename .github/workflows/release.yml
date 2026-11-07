@@ -1,0 +1,161 @@
+name: Release
+
+# Publishes a release for an existing version tag (vX.Y.Z[-pre]).
+# The version bump, commit and tag are created locally with `mise run release <level>`.
+#
+# Every job is idempotent: re-running the workflow for the same tag skips whatever is already
+# published. Use the manual trigger (Actions → Release → Run workflow, from main) to re-run a
+# tag, e.g. after a failed publish or when GitHub dropped the tag push event.
+#
+# Publishing to crates.io is opt-in: it only runs when the repository variable CRATES_IO_PUBLISH is
+# 'true' (Settings → Secrets and variables → Actions → Variables), otherwise the job is skipped and
+# the GitHub release is still created. Once enabled, a failed publish fails the workflow.
+#
+# Publish jobs stay in this file, as crates.io trusted publishing is bound to it (release.yml)
+# and the `release` environment. Build jobs for future bindings can live in reusable workflows.
+
+on:
+  push:
+    tags:
+    - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re-)release, e.g. v0.1.0
+        required: true
+        type: string
+
+permissions: {}
+
+# An explicit bash shell runs with pipefail, so failures before a pipe (e.g. into tee) fail the step
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  MISE_VERSION: 2026.10.4
+  CARGO_RELEASE_VERSION: 1.1.7
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  RUST_BACKTRACE: short
+
+jobs:
+
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: refs/tags/${{ env.TAG }}
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: jdx/mise-action@v5
+      with:
+        version: ${{ env.MISE_VERSION }}
+    - name: Check that the tag matches the workspace version
+      id: version
+      run: |
+        if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+          echo "::error::Tag '${TAG}' is not of the form vX.Y.Z[-pre]"
+          exit 1
+        fi
+        versions=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].version' | sort -u)
+        if [ "${versions}" != "${TAG#v}" ]; then
+          echo "::error::Tag '${TAG}' does not match the crate versions: ${versions//$'\n'/, }"
+          exit 1
+        fi
+        echo "version=${TAG#v}" >> "${GITHUB_OUTPUT}"
+        if [[ "${TAG}" == *-* ]]; then
+          echo "prerelease=true" >> "${GITHUB_OUTPUT}"
+        else
+          echo "prerelease=false" >> "${GITHUB_OUTPUT}"
+        fi
+    - name: Check that the tagged commit is on main
+      run: |
+        if ! git merge-base --is-ancestor HEAD origin/main; then
+          echo "::error::Tag '${TAG}' points to a commit that is not on main"
+          exit 1
+        fi
+    - run: mise run check
+    - run: mise run test
+    - name: Package the crates
+      run: cargo package --workspace
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: verify
+    if: vars.CRATES_IO_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: refs/tags/${{ env.TAG }}
+        persist-credentials: false
+    - uses: jdx/mise-action@v5
+      with:
+        version: ${{ env.MISE_VERSION }}
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-release@${{ env.CARGO_RELEASE_VERSION }}
+    - uses: rust-lang/crates-io-auth-action@v1
+      id: auth
+    # cargo-release refuses to run on a detached HEAD, which is what checking out a tag yields
+    - run: git checkout -B release
+    # Crates whose version is already on crates.io are skipped, so re-runs are safe.
+    # If all of them are, cargo-release fails with "no packages selected", which counts as done.
+    # The log lives outside the checkout, as cargo-release refuses to run with untracked files.
+    - name: Publish
+      run: |
+        log="${RUNNER_TEMP}/publish.log"
+        status=0
+        cargo release publish --workspace --execute --no-confirm 2>&1 | tee "${log}" || status=$?
+        if [ "${status}" -ne 0 ]; then
+          if grep -q "no packages selected" "${log}"; then
+            echo "All crates are already published"
+          else
+            exit "${status}"
+          fi
+        fi
+      env:
+        CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  github-release:
+    name: Create GitHub release
+    needs: [verify, publish-crates]
+    # Also runs when publish-crates was skipped (CRATES_IO_PUBLISH not enabled), but not when it failed
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.publish-crates.result != 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Create the release unless it exists
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+      run: |
+        if gh release view "${TAG}" > /dev/null 2>&1; then
+          echo "Release ${TAG} already exists, skipping"
+          exit 0
+        fi
+        flags=()
+        if [ "${PRERELEASE}" = "true" ]; then
+          flags+=(--prerelease)
+        fi
+        gh release create "${TAG}" --verify-tag --generate-notes --title "${TAG}" "${flags[@]}"
